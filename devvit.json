@@ -1,0 +1,72 @@
+{
+  "$schema": "https://developers.reddit.com/schema/config-file.v1.json",
+  "name": "rz-mod",
+  "server": {
+    "dir": "dist/server",
+    "entry": "index.cjs"
+  },
+  "menu": {
+    "items": [
+      {
+        "label": "Mop comments",
+        "description": "Remove this comment and all child comments. This might take a few seconds to run.",
+        "location": "comment",
+        "forUserType": "moderator",
+        "endpoint": "/internal/menu/mop-comment"
+      },
+      {
+        "label": "Mop post comments",
+        "description": "Remove all comments of this post. This might take a few seconds to run.",
+        "location": "post",
+        "forUserType": "moderator",
+        "endpoint": "/internal/menu/mop-post"
+      }
+    ]
+  },
+  "forms": {
+    "mopComment": "/internal/form/mop-comment-submit",
+    "mopPost": "/internal/form/mop-post-submit"
+  },
+  "triggers": {
+    "onAppInstall": "/internal/triggers/on-app-install"
+  },
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch"
+  },
+  "permissions": {
+    "reddit": true
+  },
+  "dev": {
+    "subreddit": "rz_mod_dev"
+  },
+  "settings": {
+    "subreddit": {
+      "apiKey": {
+        "type": "string",
+        "label": "API Key (OpenAI or Compatible)",
+        "helpText": "Enter your API key. E.g., OpenAI 'sk-...' or Aliyun DashScope key.",
+        "placeholder": "sk-..."
+      },
+      "baseUrl": {
+        "type": "string",
+        "label": "Custom Base URL (Optional)",
+        "helpText": "Leave default for OpenAI. For Qwen, use: https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "defaultValue": "https://api.openai.com/v1"
+      },
+      "modelName": {
+        "type": "string",
+        "label": "Model Name",
+        "helpText": "e.g., gpt-4o-mini, qwen-plus, qwen-turbo",
+        "defaultValue": "gpt-4o-mini"
+      },
+      "agentRules": {
+        "type": "paragraph",
+        "label": "Agent Rules (System Prompt)",
+        "helpText": "List your moderation rules in natural language. The Agent will enforce them on new posts/comments.",
+        "placeholder": "1. No cryptocurrency spam or promotions.\n2. No toxic behavior or personal attacks.",
+        "defaultValue": "1. No cryptocurrency spam."
+      }
+    }
+  }
+}
