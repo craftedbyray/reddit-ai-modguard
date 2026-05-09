@@ -5,6 +5,14 @@
     "dir": "dist/server",
     "entry": "index.cjs"
   },
+  "post": {
+    "dir": "dist/client",
+    "entrypoints": {
+      "default": {
+        "entry": "index.html"
+      }
+    }
+  },
   "menu": {
     "items": [
       {
@@ -20,6 +28,13 @@
         "location": "post",
         "forUserType": "moderator",
         "endpoint": "/internal/menu/mop-post"
+      },
+      {
+        "label": "Manage AI Agents",
+        "description": "Open the Multi-Agent Configuration Dashboard",
+        "location": "subreddit",
+        "forUserType": "moderator",
+        "endpoint": "/internal/menu/manage-agents"
       }
     ]
   },
@@ -28,7 +43,9 @@
     "mopPost": "/internal/form/mop-post-submit"
   },
   "triggers": {
-    "onAppInstall": "/internal/triggers/on-app-install"
+    "onAppInstall": "/internal/triggers/on-app-install",
+    "onPostSubmit": "/internal/triggers/on-post-submit",
+    "onCommentSubmit": "/internal/triggers/on-comment-submit"
   },
   "scripts": {
     "build": "vite build",
