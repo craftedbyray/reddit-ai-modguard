@@ -1,242 +1,434 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { FlowEditor } from './FlowEditor';
+import type { ModerationFlow, RFNode, ActionType, ScopeType } from './types';
+import { ACTION_LABELS, ACTION_COLORS } from './types';
 
-type ActionType = 'remove' | 'lock' | 'warn';
-type ScopeType  = 'post' | 'comment' | 'both';
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
-interface Agent {
-  id: string;
-  name: string;
-  prompt: string;
-  action: ActionType;
-  scope: ScopeType;
-  isActive: boolean;
+function makeStarterFlow(name: string, scope: ScopeType): ModerationFlow {
+  const checkId = `check-${Date.now()}`;
+  const actionId = `action-${Date.now() + 1}`;
+  return {
+    id: Date.now().toString(),
+    name,
+    scope,
+    isActive: true,
+    nodes: [
+      { id: checkId,  type: 'check',  position: { x: 100, y: 60 },  data: { label: 'Is this a violation?', prompt: '' } },
+      { id: actionId, type: 'action', position: { x: 60,  y: 230 }, data: { action: 'remove', label: 'Remove' } },
+    ],
+    edges: [
+      { id: `e-${checkId}-yes-${actionId}`, source: checkId, sourceHandle: 'yes', target: actionId },
+    ],
+  };
 }
 
-const ACTION_LABELS: Record<ActionType, string> = {
-  remove: 'Remove',
-  lock:   'Lock',
-  warn:   'Warn',
-};
+// ── Node edit panel ───────────────────────────────────────────────────────────
+
+function NodePanel({
+  flow,
+  nodeId,
+  onUpdate,
+}: {
+  flow: ModerationFlow;
+  nodeId: string;
+  onUpdate: (updatedFlow: ModerationFlow) => void;
+}) {
+  const node = flow.nodes.find(n => n.id === nodeId);
+  if (!node) return null;
+
+  function updateNodeData(patch: Record<string, unknown>) {
+    const updatedNodes = flow.nodes.map(n =>
+      n.id === nodeId ? { ...n, data: { ...n.data, ...patch } } : n
+    );
+    onUpdate({ ...flow, nodes: updatedNodes });
+  }
+
+  const data = node.data as any;
+
+  return (
+    <div style={{
+      width: 260, flexShrink: 0,
+      borderLeft: '1px solid var(--border)',
+      background: 'rgba(255,255,255,0.02)',
+      padding: 18,
+      overflowY: 'auto',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 14,
+    }}>
+      <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--fg-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: 'var(--font-mono)' }}>
+        {node.type === 'check' ? '● Check Node' : '■ Action Node'}
+      </p>
+
+      <FormField label="Label">
+        <input
+          className="field"
+          value={data.label ?? ''}
+          placeholder="Short description"
+          onChange={e => updateNodeData({ label: e.target.value })}
+        />
+      </FormField>
+
+      {node.type === 'check' && (
+        <FormField label="Prompt">
+          <textarea
+            className="field"
+            value={data.prompt ?? ''}
+            placeholder="Describe what to detect…"
+            onChange={e => updateNodeData({ prompt: e.target.value })}
+            style={{ minHeight: 120 }}
+          />
+        </FormField>
+      )}
+
+      {node.type === 'action' && (
+        <>
+          <FormField label="Action">
+            <select
+              className="field"
+              value={data.action ?? 'remove'}
+              onChange={e => {
+                const action = e.target.value as ActionType;
+                updateNodeData({ action, label: ACTION_LABELS[action] });
+              }}
+            >
+              {(Object.keys(ACTION_LABELS) as ActionType[]).map(a => (
+                <option key={a} value={a}>{ACTION_LABELS[a]}</option>
+              ))}
+            </select>
+          </FormField>
+
+          {data.action === 'flair' && (
+            <FormField label="Flair Text">
+              <input
+                className="field"
+                value={data.flairText ?? ''}
+                placeholder="e.g. ⚠️ AI Flagged"
+                onChange={e => updateNodeData({ flairText: e.target.value })}
+              />
+            </FormField>
+          )}
+
+          {data.action === 'warn' && (
+            <FormField label="Modmail Message">
+              <textarea
+                className="field"
+                value={data.warnMessage ?? ''}
+                placeholder="Message to include in modmail…"
+                onChange={e => updateNodeData({ warnMessage: e.target.value })}
+                style={{ minHeight: 80 }}
+              />
+            </FormField>
+          )}
+
+          {data.action === 'ban' && (
+            <FormField label="Ban Duration (days, 0 = permanent)">
+              <input
+                className="field"
+                type="number"
+                min={0}
+                value={data.banDuration ?? 0}
+                onChange={e => updateNodeData({ banDuration: parseInt(e.target.value) || 0 })}
+              />
+            </FormField>
+          )}
+        </>
+      )}
+
+      <p style={{ fontSize: 10, color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)', marginTop: 'auto', lineHeight: 1.6 }}>
+        {node.type === 'check'
+          ? 'Drag the green handle to connect Yes, red handle for No.'
+          : 'Action nodes are sinks — connect edges from check nodes.'}
+      </p>
+    </div>
+  );
+}
+
+// ── Main app ──────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [agents,    setAgents]    = useState<Agent[]>([]);
-  const [loading,   setLoading]   = useState(true);
-  const [saving,    setSaving]    = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-
-  const [name,   setName]   = useState('');
-  const [prompt, setPrompt] = useState('');
-  const [action, setAction] = useState<ActionType>('remove');
-  const [scope,  setScope]  = useState<ScopeType>('both');
+  const [flows, setFlows] = useState<ModerationFlow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [selectedFlowId, setSelectedFlowId] = useState<string | null>(null);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [showNewForm, setShowNewForm] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newScope, setNewScope] = useState<ScopeType>('both');
 
   useEffect(() => {
-    fetch('/api/agents')
+    fetch('/api/flows')
       .then(r => r.json())
-      .then(d => setAgents(d.agents ?? []))
+      .then(d => setFlows(d.flows ?? []))
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
-  async function persist(list: Agent[]) {
+  async function persist(list: ModerationFlow[]) {
     setSaving(true);
     try {
-      await fetch('/api/agents', {
+      await fetch('/api/flows', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ agents: list }),
+        body: JSON.stringify({ flows: list }),
       });
-      setAgents(list);
+      setFlows(list);
     } finally {
       setSaving(false);
     }
   }
 
-  function reset() {
-    setEditingId(null);
-    setName(''); setPrompt(''); setAction('remove'); setScope('both');
+  function createFlow() {
+    if (!newName.trim()) return;
+    const flow = makeStarterFlow(newName.trim(), newScope);
+    const updated = [...flows, flow];
+    persist(updated);
+    setSelectedFlowId(flow.id);
+    setSelectedNodeId(null);
+    setShowNewForm(false);
+    setNewName('');
+    setNewScope('both');
   }
 
-  function startEdit(a: Agent) {
-    setEditingId(a.id);
-    setName(a.name); setPrompt(a.prompt); setAction(a.action); setScope(a.scope ?? 'both');
+  function deleteFlow(id: string) {
+    if (!confirm('Delete this flow?')) return;
+    const updated = flows.filter(f => f.id !== id);
+    persist(updated);
+    if (selectedFlowId === id) {
+      setSelectedFlowId(null);
+      setSelectedNodeId(null);
+    }
   }
 
-  function submit() {
-    if (!name.trim() || !prompt.trim() || saving) return;
-    const agent: Agent = {
-      id: editingId ?? Date.now().toString(),
-      name: name.trim(), prompt: prompt.trim(), action, scope, isActive: true,
-    };
-    persist(
-      editingId
-        ? agents.map(a => (a.id === editingId ? agent : a))
-        : [...agents, agent]
-    );
-    reset();
+  function toggleFlow(id: string) {
+    persist(flows.map(f => f.id === id ? { ...f, isActive: !f.isActive } : f));
   }
 
-  const activeCount = agents.filter(a => a.isActive).length;
-  const valid = name.trim().length > 0 && prompt.trim().length > 0;
+  const updateFlow = useCallback((updated: ModerationFlow) => {
+    setFlows(prev => prev.map(f => f.id === updated.id ? updated : f));
+  }, []);
+
+  function saveFlow() {
+    persist(flows);
+  }
+
+  const selectedFlow = flows.find(f => f.id === selectedFlowId) ?? null;
+  const activeCount = flows.filter(f => f.isActive).length;
 
   return (
-    <div style={{ position: 'relative', minHeight: '100vh', padding: '24px', zIndex: 1 }}>
-      {/* Ambient blobs */}
+    <div style={{ position: 'relative', minHeight: '100vh', zIndex: 1, display: 'flex', flexDirection: 'column' }}>
       <div className="blob blob-a" />
       <div className="blob blob-b" />
       <div className="blob blob-c" />
 
-      {/* Content */}
-      <div style={{ position: 'relative', zIndex: 2, maxWidth: 1080, margin: '0 auto' }}>
+      <div style={{ position: 'relative', zIndex: 2, display: 'flex', flexDirection: 'column', height: '100vh' }}>
 
         {/* Header */}
-        <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 28 }}>
+        <header style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          padding: '14px 20px', borderBottom: '1px solid var(--border)',
+          background: 'rgba(5,5,6,0.85)', backdropFilter: 'blur(12px)',
+          flexShrink: 0,
+        }}>
           <div>
-            <h1 style={{
-              fontFamily: 'var(--font-sans)',
-              fontSize: 26,
-              fontWeight: 700,
-              color: 'var(--fg)',
-              letterSpacing: '-0.02em',
-              lineHeight: 1.2,
-            }}>
+            <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--fg)', letterSpacing: '-0.02em' }}>
               AI Mod Guardian
             </h1>
-            <p style={{ color: 'var(--fg-muted)', fontSize: 12, marginTop: 4, fontFamily: 'var(--font-sans)' }}>
-              Autonomous LLM agents enforcing your community rules
+            <p style={{ color: 'var(--fg-muted)', fontSize: 11, marginTop: 2, fontFamily: 'var(--font-mono)' }}>
+              Visual moderation flow builder
             </p>
           </div>
-
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            {saving && (
-              <span style={{ fontSize: 11, color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)' }}>
-                syncing…
-              </span>
+            {saving && <span style={{ fontSize: 11, color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)' }}>saving…</span>}
+            {selectedFlow && (
+              <button className="btn-primary" style={{ flex: 'none', padding: '8px 16px', fontSize: 12 }} onClick={saveFlow} disabled={saving}>
+                Save Flow
+              </button>
             )}
             <div style={{
-              display: 'flex', alignItems: 'center', gap: 7,
-              padding: '6px 13px', borderRadius: 999,
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '5px 12px', borderRadius: 999,
               border: '1px solid var(--border-strong)',
               background: 'var(--surface)',
               fontSize: 12, fontWeight: 600,
-              color: 'var(--fg-muted)',
-              fontFamily: 'var(--font-mono)',
+              color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)',
             }}>
-              <span className="dot" style={activeCount === 0 ? { background: 'var(--fg-muted)', boxShadow: 'none' } : {}} />
+              <span className={`dot${activeCount === 0 ? ' dot-off' : ''}`} style={{ width: 6, height: 6 }} />
               {activeCount} active
             </div>
           </div>
         </header>
 
-        {/* Layout */}
-        <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 20 }}>
+        {/* Body */}
+        <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
 
-          {/* ── Left: Form ── */}
-          <div className="glass" style={{ padding: 20 }}>
-            <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)', marginBottom: 18, fontFamily: 'var(--font-sans)' }}>
-              {editingId ? '✎ Edit Agent' : '+ Deploy Agent'}
-            </p>
-
-            <FormField label="Agent Name">
-              <input
-                className="field"
-                placeholder="e.g. Toxicity Filter"
-                value={name}
-                onChange={e => setName(e.target.value)}
-              />
-            </FormField>
-
-            <FormField label="Rule Prompt">
-              <textarea
-                className="field"
-                placeholder="Describe what this agent should detect and why it violates your rules…"
-                value={prompt}
-                onChange={e => setPrompt(e.target.value)}
-              />
-            </FormField>
-
-            <FormField label="Scope">
-              <div className="seg">
-                {(['post', 'comment', 'both'] as ScopeType[]).map(s => (
-                  <button
-                    key={s}
-                    className={`seg-btn${scope === s ? ' active' : ''}`}
-                    onClick={() => setScope(s)}
-                  >
-                    {s === 'post' ? 'Posts' : s === 'comment' ? 'Comments' : 'Both'}
-                  </button>
-                ))}
-              </div>
-            </FormField>
-
-            <FormField label="Action">
-              <div className="seg">
-                {(['remove', 'lock', 'warn'] as ActionType[]).map(a => (
-                  <button
-                    key={a}
-                    className={`seg-btn${action === a ? ' active' : ''}`}
-                    onClick={() => setAction(a)}
-                  >
-                    {ACTION_LABELS[a]}
-                  </button>
-                ))}
-              </div>
-            </FormField>
-
-            <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-              <button className="btn-primary" disabled={!valid || saving} onClick={submit}>
-                {editingId ? 'Update Agent' : 'Deploy Agent'}
+          {/* Sidebar */}
+          <div style={{
+            width: 230, flexShrink: 0,
+            borderRight: '1px solid var(--border)',
+            background: 'rgba(5,5,6,0.6)',
+            display: 'flex', flexDirection: 'column',
+            overflowY: 'auto',
+          }}>
+            <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--border)' }}>
+              <button
+                className="btn-primary"
+                style={{ width: '100%', flex: 'none', fontSize: 12, padding: '8px 0' }}
+                onClick={() => setShowNewForm(v => !v)}
+              >
+                {showNewForm ? 'Cancel' : '+ New Flow'}
               </button>
-              {editingId && (
-                <button className="btn-ghost" onClick={reset}>Cancel</button>
+
+              {showNewForm && (
+                <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <input
+                    className="field"
+                    placeholder="Flow name…"
+                    value={newName}
+                    autoFocus
+                    onChange={e => setNewName(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && createFlow()}
+                  />
+                  <div className="seg">
+                    {(['post', 'comment', 'both'] as ScopeType[]).map(s => (
+                      <button key={s} className={`seg-btn${newScope === s ? ' active' : ''}`} onClick={() => setNewScope(s)}>
+                        {s === 'post' ? 'Posts' : s === 'comment' ? 'Comments' : 'Both'}
+                      </button>
+                    ))}
+                  </div>
+                  <button className="btn-primary" style={{ fontSize: 12 }} disabled={!newName.trim()} onClick={createFlow}>
+                    Create
+                  </button>
+                </div>
               )}
             </div>
-          </div>
 
-          {/* ── Right: Agent list ── */}
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-              <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)', fontFamily: 'var(--font-sans)' }}>
-                Active Forces
-              </p>
-              <p style={{ fontSize: 11, color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)' }}>
-                {agents.length} total
-              </p>
-            </div>
-
-            {loading && (
-              <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--fg-muted)', fontSize: 13 }}>
-                Loading agents…
-              </div>
-            )}
-
-            {!loading && agents.length === 0 && (
-              <div style={{
-                padding: '48px 24px', textAlign: 'center',
-                border: '1px dashed var(--border)', borderRadius: 'var(--radius)',
-              }}>
-                <p style={{ color: 'var(--fg)', fontWeight: 600, fontSize: 14 }}>No agents deployed</p>
-                <p style={{ color: 'var(--fg-muted)', fontSize: 12, marginTop: 6 }}>
-                  Create your first AI moderator on the left.
-                </p>
-              </div>
-            )}
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {agents.map(agent => (
-                <AgentCard
-                  key={agent.id}
-                  agent={agent}
-                  onToggle={() => persist(agents.map(a => a.id === agent.id ? { ...a, isActive: !a.isActive } : a))}
-                  onEdit={() => startEdit(agent)}
-                  onDelete={() => {
-                    if (confirm(`Delete "${agent.name}"?`))
-                      persist(agents.filter(a => a.id !== agent.id));
-                  }}
+            <div style={{ flex: 1, padding: '8px 0' }}>
+              {loading && (
+                <p style={{ padding: '20px 14px', color: 'var(--fg-muted)', fontSize: 12 }}>Loading…</p>
+              )}
+              {!loading && flows.length === 0 && (
+                <p style={{ padding: '20px 14px', color: 'var(--fg-muted)', fontSize: 12 }}>No flows yet. Create one above.</p>
+              )}
+              {flows.map(flow => (
+                <FlowListItem
+                  key={flow.id}
+                  flow={flow}
+                  isSelected={flow.id === selectedFlowId}
+                  onSelect={() => { setSelectedFlowId(flow.id); setSelectedNodeId(null); }}
+                  onToggle={() => toggleFlow(flow.id)}
+                  onDelete={() => deleteFlow(flow.id)}
                 />
               ))}
             </div>
           </div>
+
+          {/* Canvas area */}
+          {selectedFlow ? (
+            <div style={{ flex: 1, display: 'flex', minWidth: 0 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <FlowEditor
+                  flow={selectedFlow}
+                  onFlowChange={updateFlow}
+                  onNodeSelect={setSelectedNodeId}
+                  selectedNodeId={selectedNodeId}
+                />
+              </div>
+              {selectedNodeId && (
+                <NodePanel
+                  flow={selectedFlow}
+                  nodeId={selectedNodeId}
+                  onUpdate={updateFlow}
+                />
+              )}
+            </div>
+          ) : (
+            <div style={{
+              flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexDirection: 'column', gap: 12,
+            }}>
+              <p style={{ color: 'var(--fg)', fontWeight: 600, fontSize: 16 }}>No flow selected</p>
+              <p style={{ color: 'var(--fg-muted)', fontSize: 13 }}>
+                {flows.length === 0 ? 'Create your first moderation flow on the left.' : 'Select a flow from the sidebar.'}
+              </p>
+            </div>
+          )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Sub-components ────────────────────────────────────────────────────────────
+
+function FlowListItem({
+  flow, isSelected, onSelect, onToggle, onDelete,
+}: {
+  flow: ModerationFlow;
+  isSelected: boolean;
+  onSelect: () => void;
+  onToggle: () => void;
+  onDelete: () => void;
+}) {
+  const checkCount = flow.nodes.filter(n => n.type === 'check').length;
+  const actionCount = flow.nodes.filter(n => n.type === 'action').length;
+
+  // Get unique action colors for the flow
+  const actionColors = [...new Set(
+    flow.nodes.filter(n => n.type === 'action').map(n => ACTION_COLORS[(n.data as any).action])
+  )].slice(0, 3);
+
+  return (
+    <div
+      onClick={onSelect}
+      style={{
+        padding: '10px 14px',
+        cursor: 'pointer',
+        background: isSelected ? 'rgba(255,255,255,0.06)' : 'transparent',
+        borderLeft: `2px solid ${isSelected ? 'var(--accent)' : 'transparent'}`,
+        transition: 'all 150ms ease',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)' }}>{flow.name}</span>
+        <div style={{ display: 'flex', gap: 4 }}>
+          <button
+            className="icon-btn"
+            style={{ padding: 4 }}
+            onClick={e => { e.stopPropagation(); onToggle(); }}
+            title={flow.isActive ? 'Pause' : 'Activate'}
+          >
+            <span className={`dot${flow.isActive ? '' : ' dot-off'}`} style={{ width: 6, height: 6 }} />
+          </button>
+          <button
+            className="icon-btn del"
+            style={{ padding: 4 }}
+            onClick={e => { e.stopPropagation(); onDelete(); }}
+            title="Delete"
+          >
+            <TrashIcon />
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ fontSize: 10, color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)' }}>
+          {checkCount} checks · {actionCount} actions
+        </span>
+        {actionColors.map((c, i) => (
+          <span key={i} style={{ width: 8, height: 8, borderRadius: '50%', background: c, display: 'inline-block' }} />
+        ))}
+      </div>
+
+      <div style={{ marginTop: 4 }}>
+        <span style={{
+          fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em',
+          color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)',
+          padding: '1px 5px', borderRadius: 3, border: '1px solid var(--border)',
+        }}>
+          {flow.scope}
+        </span>
       </div>
     </div>
   );
@@ -244,11 +436,11 @@ export default function App() {
 
 function FormField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div style={{ marginBottom: 14 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
       <label style={{
-        display: 'block', fontSize: 11, fontWeight: 600,
-        color: 'var(--fg-muted)', marginBottom: 6,
-        fontFamily: 'var(--font-mono)', letterSpacing: '0.05em', textTransform: 'uppercase',
+        fontSize: 10, fontWeight: 700, color: 'var(--fg-muted)',
+        textTransform: 'uppercase', letterSpacing: '0.06em',
+        fontFamily: 'var(--font-mono)',
       }}>
         {label}
       </label>
@@ -257,70 +449,9 @@ function FormField({ label, children }: { label: string; children: React.ReactNo
   );
 }
 
-function AgentCard({
-  agent, onToggle, onEdit, onDelete,
-}: {
-  agent: Agent;
-  onToggle: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
-}) {
-  return (
-    <div className={`agent-card ${agent.isActive ? 'active-card' : 'paused-card'}`}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-
-        {/* Left: info */}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap', marginBottom: 6 }}>
-            <span style={{ fontWeight: 600, fontSize: 14, color: 'var(--fg)', fontFamily: 'var(--font-sans)' }}>
-              {agent.name}
-            </span>
-            <span className={`tag tag-action-${agent.action}`}>{agent.action}</span>
-            <span className="tag tag-scope">{agent.scope ?? 'both'}</span>
-          </div>
-          <p style={{
-            fontSize: 12, color: 'var(--fg-muted)', lineHeight: 1.55,
-            fontFamily: 'var(--font-sans)',
-            display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
-          }}>
-            {agent.prompt}
-          </p>
-        </div>
-
-        {/* Right: actions */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-          <button
-            className={`pill ${agent.isActive ? 'pill-active' : 'pill-paused'}`}
-            onClick={onToggle}
-          >
-            <span className={`dot${agent.isActive ? '' : ' dot-off'}`} style={{ width: 5, height: 5 }} />
-            {agent.isActive ? 'Active' : 'Paused'}
-          </button>
-
-          <button className="icon-btn edit" onClick={onEdit} title="Edit">
-            <EditIcon />
-          </button>
-          <button className="icon-btn del" onClick={onDelete} title="Delete">
-            <TrashIcon />
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function EditIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-    </svg>
-  );
-}
-
 function TrashIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="3 6 5 6 21 6" />
       <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
     </svg>

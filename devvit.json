@@ -30,8 +30,8 @@
         "endpoint": "/internal/menu/mop-post"
       },
       {
-        "label": "Manage AI Agents",
-        "description": "Open the Multi-Agent Configuration Dashboard",
+        "label": "Manage Moderation Flows",
+        "description": "Open the Moderation Flow Editor",
         "location": "subreddit",
         "forUserType": "moderator",
         "endpoint": "/internal/menu/manage-agents"
@@ -76,13 +76,6 @@
         "label": "Model Name",
         "helpText": "e.g., gpt-4o-mini, qwen-plus, qwen-turbo",
         "defaultValue": "gpt-4o-mini"
-      },
-      "agentRules": {
-        "type": "paragraph",
-        "label": "Agent Rules (System Prompt)",
-        "helpText": "List your moderation rules in natural language. The Agent will enforce them on new posts/comments.",
-        "placeholder": "1. No cryptocurrency spam or promotions.\n2. No toxic behavior or personal attacks.",
-        "defaultValue": "1. No cryptocurrency spam."
       }
     }
   }

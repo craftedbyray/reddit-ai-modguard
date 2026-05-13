@@ -3,30 +3,28 @@ import { redis } from '@devvit/web/server';
 
 export const api = new Hono();
 
-const AGENTS_KEY = 'automod:agents';
+const FLOWS_KEY = 'automod:flows';
 
-// Get all configured agents
-api.get('/agents', async (c) => {
+api.get('/flows', async (c) => {
   try {
-    const agentsStr = await redis.get(AGENTS_KEY);
-    const agents = agentsStr ? JSON.parse(agentsStr) : [];
-    return c.json({ agents });
+    const raw = await redis.get(FLOWS_KEY);
+    const flows = raw ? JSON.parse(raw) : [];
+    return c.json({ flows });
   } catch (err) {
-    console.error('Error fetching agents:', err);
-    return c.json({ agents: [], error: 'Failed to load agents' }, 500);
+    console.error('Error fetching flows:', err);
+    return c.json({ flows: [], error: 'Failed to load flows' }, 500);
   }
 });
 
-// Save agents list
-api.post('/agents', async (c) => {
+api.post('/flows', async (c) => {
   try {
     const body = await c.req.json();
-    if (body.agents && Array.isArray(body.agents)) {
-      await redis.set(AGENTS_KEY, JSON.stringify(body.agents));
+    if (body.flows && Array.isArray(body.flows)) {
+      await redis.set(FLOWS_KEY, JSON.stringify(body.flows));
     }
     return c.json({ success: true });
   } catch (err) {
-    console.error('Error saving agents:', err);
-    return c.json({ success: false, error: 'Failed to save agents' }, 500);
+    console.error('Error saving flows:', err);
+    return c.json({ success: false, error: 'Failed to save flows' }, 500);
   }
 });

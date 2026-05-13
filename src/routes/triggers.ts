@@ -1,34 +1,270 @@
 import { Hono } from 'hono';
 import type { OnAppInstallRequest, OnPostSubmitRequest, OnCommentSubmitRequest, TriggerResponse } from '@devvit/web/shared';
 import { reddit, redis } from '@devvit/web/server';
+import { getAgentConfig } from '../core/settings';
+import type { T1, T3 } from '@devvit/shared-types/tid.js';
 
 export const triggers = new Hono();
 
+const FLOWS_KEY = 'automod:flows';
+
+// ── Types (mirrored from client, no import to keep server bundle clean) ───────
+
+type ActionType = 'remove' | 'spam' | 'filter' | 'lock' | 'approve' | 'flair' | 'warn' | 'ban' | 'mute';
+type ScopeType = 'post' | 'comment' | 'both';
+
+interface CheckNodeData { label: string; prompt: string; }
+interface ActionNodeData {
+  action: ActionType; label: string;
+  flairText?: string; warnMessage?: string; banDuration?: number;
+}
+interface RFNode {
+  id: string; type: 'check' | 'action';
+  position: { x: number; y: number };
+  data: CheckNodeData | ActionNodeData;
+}
+interface RFEdge { id: string; source: string; sourceHandle: 'yes' | 'no'; target: string; }
+interface ModerationFlow {
+  id: string; name: string; scope: ScopeType; isActive: boolean;
+  nodes: RFNode[]; edges: RFEdge[];
+}
+
+// ── LLM call ─────────────────────────────────────────────────────────────────
+
+interface LLMVerdict { violation: boolean; reason: string; }
+
+async function callLLM(
+  apiKey: string, baseUrl: string, modelName: string,
+  prompt: string, content: string
+): Promise<LLMVerdict> {
+  const res = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model: modelName, temperature: 0, max_tokens: 150,
+      messages: [
+        {
+          role: 'system',
+          content: `You are a Reddit community moderator AI. Evaluate content against this rule:\n\n${prompt}\n\nReply ONLY with valid JSON: {"violation": true or false, "reason": "one sentence"}`,
+        },
+        { role: 'user', content: `Content to evaluate:\n\n${content}` },
+      ],
+    }),
+  });
+  if (!res.ok) throw new Error(`LLM API ${res.status}: ${await res.text()}`);
+  const data = (await res.json()) as { choices: { message: { content: string } }[] };
+  const text = data.choices?.[0]?.message?.content ?? '';
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error(`No JSON in LLM response: ${text}`);
+  return JSON.parse(match[0]) as LLMVerdict;
+}
+
+// ── DAG traversal ─────────────────────────────────────────────────────────────
+
+async function traverseFlow(
+  flow: ModerationFlow,
+  content: string,
+  config: { apiKey: string; baseUrl: string; modelName: string },
+  context: { postId?: T3; commentId?: T1; subredditName: string; authorName?: string }
+): Promise<void> {
+  const nodeMap = new Map(flow.nodes.map(n => [n.id, n]));
+
+  // Find root: node with no incoming edges
+  const hasIncoming = new Set(flow.edges.map(e => e.target));
+  const root = flow.nodes.find(n => !hasIncoming.has(n.id));
+  if (!root) { console.warn(`[${flow.name}] No root node found`); return; }
+
+  let current: RFNode | undefined = root;
+  let depth = 0;
+
+  while (current && depth < 20) {
+    depth++;
+
+    if (current.type === 'action') {
+      await executeAction(current.data as ActionNodeData, context);
+      return;
+    }
+
+    // Check node: call LLM and follow yes/no edge
+    const data = current.data as CheckNodeData;
+    if (!data.prompt?.trim()) {
+      console.warn(`[${flow.name}] Node "${data.label}" has no prompt, skipping`);
+      return;
+    }
+
+    let verdict: LLMVerdict;
+    try {
+      verdict = await callLLM(config.apiKey, config.baseUrl, config.modelName, data.prompt, content);
+    } catch (err) {
+      console.error(`[${flow.name}] LLM error at "${data.label}":`, err);
+      return;
+    }
+
+    console.log(`[${flow.name}] "${data.label}": violation=${verdict.violation} — ${verdict.reason}`);
+
+    const handle: 'yes' | 'no' = verdict.violation ? 'yes' : 'no';
+    const edge = flow.edges.find(e => e.source === current!.id && e.sourceHandle === handle);
+    if (!edge) return; // dead end, no action
+
+    current = nodeMap.get(edge.target);
+  }
+}
+
+// ── Action executor ───────────────────────────────────────────────────────────
+
+async function executeAction(
+  data: ActionNodeData,
+  ctx: { postId?: T3; commentId?: T1; subredditName: string; authorName?: string }
+) {
+  const thingId = ctx.commentId ?? ctx.postId;
+  if (!thingId) return;
+
+  console.log(`[Action] ${data.action} on ${thingId}`);
+
+  try {
+    switch (data.action) {
+      case 'remove':
+        await reddit.remove(thingId, false);
+        break;
+
+      case 'spam':
+        await reddit.remove(thingId, true);
+        break;
+
+      case 'filter':
+        if (ctx.postId)    { const p = await reddit.getPostById(ctx.postId);       await p.filter(); }
+        else if (ctx.commentId) { const c = await reddit.getCommentById(ctx.commentId); await c.filter(); }
+        break;
+
+      case 'lock':
+        if (ctx.postId)    { const p = await reddit.getPostById(ctx.postId);       await p.lock(); }
+        else if (ctx.commentId) { const c = await reddit.getCommentById(ctx.commentId); await c.lock(); }
+        break;
+
+      case 'approve':
+        await reddit.approve(thingId);
+        break;
+
+      case 'flair':
+        if (ctx.postId) {
+          await reddit.setPostFlair({
+            subredditName: ctx.subredditName,
+            postId: ctx.postId,
+            text: data.flairText || '⚠️ AI Flagged',
+          });
+        }
+        break;
+
+      case 'warn':
+        await reddit.modMail.createConversation({
+          subredditName: ctx.subredditName,
+          subject: '[AI Mod] Content flagged for review',
+          body: `**Content ID:** ${thingId}\n\n**Reason:** ${data.warnMessage || 'Potential rule violation detected by AI.'}`,
+          to: null,
+        });
+        break;
+
+      case 'ban':
+        if (ctx.authorName) {
+          await reddit.banUser({
+            subredditName: ctx.subredditName,
+            username: ctx.authorName,
+            duration: data.banDuration && data.banDuration > 0 ? data.banDuration : undefined,
+            note: 'Banned by AI Mod Guardian',
+          });
+        }
+        break;
+
+      case 'mute':
+        if (ctx.authorName) {
+          await reddit.muteUser({ subredditName: ctx.subredditName, username: ctx.authorName });
+        }
+        break;
+    }
+  } catch (err) {
+    console.error(`[Action] ${data.action} failed:`, err);
+  }
+}
+
+// ── Load active flows ─────────────────────────────────────────────────────────
+
+async function loadFlows(scope: 'post' | 'comment'): Promise<ModerationFlow[]> {
+  const raw = await redis.get(FLOWS_KEY);
+  if (!raw) return [];
+  const all: ModerationFlow[] = JSON.parse(raw);
+  return all.filter(f => f.isActive && (f.scope === scope || f.scope === 'both'));
+}
+
+// ── Trigger handlers ──────────────────────────────────────────────────────────
+
 triggers.post('/on-app-install', async (c) => {
   const input = await c.req.json<OnAppInstallRequest>();
-  console.log('App installed to subreddit: r/' + input.subreddit?.name);
-
-  return c.json<TriggerResponse>({ status: 'success' }, 200);
+  console.log('[rz-mod] Installed to r/' + input.subreddit?.name);
+  return c.json<TriggerResponse>({}, 200);
 });
 
 triggers.post('/on-post-submit', async (c) => {
   const event = await c.req.json<OnPostSubmitRequest>();
-  console.log(`[AI Engine] New post submitted: ${event.post?.title}`);
+  const post = event.post;
+  const subredditName = event.subreddit?.name ?? '';
+  if (!post?.id || !subredditName) return c.json<TriggerResponse>({}, 200);
 
-  // TODO: Fetch AI Agents from Redis
-  // TODO: Run LLM Inference
-  // TODO: Execute moderation action
-  
-  return c.json<TriggerResponse>({ status: 'success' }, 200);
+  const postId = `t3_${post.id}` as T3;
+  const content = `Title: ${post.title}\n\nBody: ${post.selftext ?? ''}`.trim();
+  console.log(`[AI Engine] Post: "${post.title}"`);
+
+  try {
+    const config = await getAgentConfig();
+    if (!config.apiKey) return c.json<TriggerResponse>({}, 200);
+
+    const flows = await loadFlows('post');
+    for (const flow of flows) {
+      try {
+        await traverseFlow(flow, content, config, {
+          postId,
+          subredditName,
+          authorName: event.author?.name,
+        });
+      } catch (err) {
+        console.error(`[${flow.name}] Error:`, err);
+      }
+    }
+  } catch (err) {
+    console.error('[AI Engine] on-post-submit error:', err);
+  }
+
+  return c.json<TriggerResponse>({}, 200);
 });
 
 triggers.post('/on-comment-submit', async (c) => {
   const event = await c.req.json<OnCommentSubmitRequest>();
-  console.log(`[AI Engine] New comment submitted: ${event.comment?.id}`);
+  const comment = event.comment;
+  const subredditName = event.subreddit?.name ?? '';
+  if (!comment?.id || !subredditName) return c.json<TriggerResponse>({}, 200);
 
-  // TODO: Fetch AI Agents from Redis
-  // TODO: Run LLM Inference
-  // TODO: Execute moderation action
+  const commentId = `t1_${comment.id}` as T1;
+  const content = comment.body ?? '';
+  console.log(`[AI Engine] Comment: ${comment.id}`);
 
-  return c.json<TriggerResponse>({ status: 'success' }, 200);
+  try {
+    const config = await getAgentConfig();
+    if (!config.apiKey) return c.json<TriggerResponse>({}, 200);
+
+    const flows = await loadFlows('comment');
+    for (const flow of flows) {
+      try {
+        await traverseFlow(flow, content, config, {
+          commentId,
+          subredditName,
+          authorName: event.author?.name,
+        });
+      } catch (err) {
+        console.error(`[${flow.name}] Error:`, err);
+      }
+    }
+  } catch (err) {
+    console.error('[AI Engine] on-comment-submit error:', err);
+  }
+
+  return c.json<TriggerResponse>({}, 200);
 });
