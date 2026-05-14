@@ -41,21 +41,28 @@ async function callLLM(
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
-      model: modelName, temperature: 0, max_tokens: 150,
+      model: modelName, temperature: 0, max_tokens: 500,
+      response_format: { type: 'json_object' },
       messages: [
         {
           role: 'system',
-          content: `You are a Reddit community moderator AI. Evaluate content against this rule:\n\n${prompt}\n\nReply ONLY with valid JSON: {"violation": true or false, "reason": "one sentence"}`,
+          content: `You are a content classifier. Your job is to evaluate user-generated content against a moderation rule and respond with structured JSON. You are not endorsing or producing the content — you are analyzing it for a moderation system.\n\nRule:\n${prompt}\n\nRespond ONLY with valid JSON: {"violation": true, "reason": "brief explanation"} or {"violation": false, "reason": "brief explanation"}. Reason must be under 20 words.`,
         },
-        { role: 'user', content: `Content to evaluate:\n\n${content}` },
+        { role: 'user', content: `Content to classify:\n\n${content}` },
       ],
     }),
   });
-  if (!res.ok) throw new Error(`LLM API ${res.status}: ${await res.text()}`);
-  const data = (await res.json()) as { choices: { message: { content: string } }[] };
+  const rawBody = await res.text();
+  console.log(`[LLM] status=${res.status} rawResponse=${rawBody}`);
+  if (!res.ok) throw new Error(`LLM API ${res.status}: ${rawBody}`);
+  const data = JSON.parse(rawBody) as {
+    choices: { message: { content: string }; finish_reason?: string }[];
+  };
   const text = data.choices?.[0]?.message?.content ?? '';
+  const finishReason = data.choices?.[0]?.finish_reason;
+  console.log(`[LLM] finish_reason=${finishReason} content=${JSON.stringify(text)}`);
   const match = text.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error(`No JSON in LLM response: ${text}`);
+  if (!match) throw new Error(`No JSON in LLM response (finish_reason=${finishReason}): ${text}`);
   return JSON.parse(match[0]) as LLMVerdict;
 }
 
@@ -76,12 +83,13 @@ async function traverseFlow(
 
   let current: RFNode | undefined = root;
   let depth = 0;
+  let lastReason = '';
 
   while (current && depth < 20) {
     depth++;
 
     if (current.type === 'action') {
-      await executeAction(current.data as ActionNodeData, context);
+      await executeAction(current.data as ActionNodeData, context, lastReason);
       return;
     }
 
@@ -101,6 +109,7 @@ async function traverseFlow(
     }
 
     console.log(`[${flow.name}] "${data.label}": violation=${verdict.violation} — ${verdict.reason}`);
+    lastReason = verdict.reason;
 
     const handle: 'yes' | 'no' = verdict.violation ? 'yes' : 'no';
     const edge = flow.edges.find(e => e.source === current!.id && e.sourceHandle === handle);
@@ -114,10 +123,12 @@ async function traverseFlow(
 
 async function executeAction(
   data: ActionNodeData,
-  ctx: { postId?: T3; commentId?: T1; subredditName: string; authorName?: string }
+  ctx: { postId?: T3; commentId?: T1; subredditName: string; authorName?: string },
+  reason: string
 ) {
   const thingId = ctx.commentId ?? ctx.postId;
   if (!thingId) return;
+  const modNote = `[AI Mod] ${reason}`.slice(0, 100);
 
   console.log(`[Action] ${data.action} on ${thingId}`);
 
@@ -125,10 +136,12 @@ async function executeAction(
     switch (data.action) {
       case 'remove':
         await reddit.remove(thingId, false);
+        await addRemovalNote(ctx, modNote);
         break;
 
       case 'spam':
         await reddit.remove(thingId, true);
+        await addRemovalNote(ctx, modNote);
         break;
 
       case 'filter':
@@ -186,6 +199,23 @@ async function executeAction(
   }
 }
 
+async function addRemovalNote(
+  ctx: { postId?: T3; commentId?: T1 },
+  modNote: string
+) {
+  try {
+    if (ctx.postId) {
+      const p = await reddit.getPostById(ctx.postId);
+      await p.addRemovalNote({ reasonId: '', modNote });
+    } else if (ctx.commentId) {
+      const c = await reddit.getCommentById(ctx.commentId);
+      await c.addRemovalNote({ reasonId: '', modNote });
+    }
+  } catch (err) {
+    console.error('[Action] addRemovalNote failed:', err);
+  }
+}
+
 // ── Load active flows ─────────────────────────────────────────────────────────
 
 async function loadFlows(scope: 'post' | 'comment'): Promise<ModerationFlow[]> {
@@ -209,7 +239,7 @@ triggers.post('/on-post-submit', async (c) => {
   const subredditName = event.subreddit?.name ?? '';
   if (!post?.id || !subredditName) return c.json<TriggerResponse>({}, 200);
 
-  const postId = `t3_${post.id}` as T3;
+  const postId = (post.id.startsWith('t3_') ? post.id : `t3_${post.id}`) as T3;
   const content = `Title: ${post.title}\n\nBody: ${post.selftext ?? ''}`.trim();
   console.log(`[AI Engine] Post: "${post.title}"`);
 
@@ -242,7 +272,7 @@ triggers.post('/on-comment-submit', async (c) => {
   const subredditName = event.subreddit?.name ?? '';
   if (!comment?.id || !subredditName) return c.json<TriggerResponse>({}, 200);
 
-  const commentId = `t1_${comment.id}` as T1;
+  const commentId = (comment.id.startsWith('t1_') ? comment.id : `t1_${comment.id}`) as T1;
   const content = comment.body ?? '';
   console.log(`[AI Engine] Comment: ${comment.id}`);
 

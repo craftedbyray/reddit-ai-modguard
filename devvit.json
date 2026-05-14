@@ -52,7 +52,14 @@
     "dev": "vite build --watch"
   },
   "permissions": {
-    "reddit": true
+    "reddit": true,
+    "http": {
+      "domains": [
+        "api.openai.com",
+        "dashscope.aliyuncs.com",
+        "dashscope-us.aliyuncs.com"
+      ]
+    }
   },
   "dev": {
     "subreddit": "rz_mod_dev"
