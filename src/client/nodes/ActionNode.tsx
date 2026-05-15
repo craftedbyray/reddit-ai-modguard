@@ -44,6 +44,13 @@ export function ActionNode({ data, selected }: { data: ActionNodeData; selected:
           Flair: "{data.flairText}"
         </div>
       )}
+
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        id="next"
+        style={{ ...handleStyle, background: color }}
+      />
     </div>
   );
 }

@@ -23,7 +23,7 @@ interface RFNode {
   position: { x: number; y: number };
   data: CheckNodeData | ActionNodeData;
 }
-interface RFEdge { id: string; source: string; sourceHandle: 'yes' | 'no'; target: string; }
+interface RFEdge { id: string; source: string; sourceHandle: 'yes' | 'no' | 'next'; target: string; }
 interface ModerationFlow {
   id: string; name: string; scope: ScopeType; isActive: boolean;
   nodes: RFNode[]; edges: RFEdge[];
@@ -72,7 +72,7 @@ async function traverseFlow(
   flow: ModerationFlow,
   content: string,
   config: { apiKey: string; baseUrl: string; modelName: string },
-  context: { postId?: T3; commentId?: T1; subredditName: string; authorName?: string }
+  context: { postId?: T3; commentId?: T1; subredditName: string; authorName?: string; postTitle?: string; postBody?: string }
 ): Promise<void> {
   const nodeMap = new Map(flow.nodes.map(n => [n.id, n]));
 
@@ -90,7 +90,10 @@ async function traverseFlow(
 
     if (current.type === 'action') {
       await executeAction(current.data as ActionNodeData, context, lastReason);
-      return;
+      const nextEdge = flow.edges.find(e => e.source === current!.id && e.sourceHandle === 'next');
+      if (!nextEdge) return;
+      current = nodeMap.get(nextEdge.target);
+      continue;
     }
 
     // Check node: call LLM and follow yes/no edge
@@ -123,7 +126,7 @@ async function traverseFlow(
 
 async function executeAction(
   data: ActionNodeData,
-  ctx: { postId?: T3; commentId?: T1; subredditName: string; authorName?: string },
+  ctx: { postId?: T3; commentId?: T1; subredditName: string; authorName?: string; postTitle?: string; postBody?: string },
   reason: string
 ) {
   const thingId = ctx.commentId ?? ctx.postId;
@@ -168,14 +171,23 @@ async function executeAction(
         }
         break;
 
-      case 'warn':
+      case 'warn': {
+        const parts = [
+          `**Content ID:** ${thingId}`,
+          ctx.authorName ? `**Author:** u/${ctx.authorName}` : '',
+          ctx.postTitle ? `**Post Title:** ${ctx.postTitle}` : '',
+          ctx.postBody ? `**Post Content:**\n${ctx.postBody}` : '',
+          `**AI Reason:** ${reason || 'N/A'}`,
+          data.warnMessage ? `**Mod Note:** ${data.warnMessage}` : '',
+        ].filter(Boolean);
         await reddit.modMail.createConversation({
           subredditName: ctx.subredditName,
           subject: '[AI Mod] Content flagged for review',
-          body: `**Content ID:** ${thingId}\n\n**Reason:** ${data.warnMessage || 'Potential rule violation detected by AI.'}`,
+          body: parts.join('\n\n'),
           to: null,
         });
         break;
+      }
 
       case 'ban':
         if (ctx.authorName) {
@@ -254,6 +266,8 @@ triggers.post('/on-post-submit', async (c) => {
           postId,
           subredditName,
           authorName: event.author?.name,
+          postTitle: post.title,
+          postBody: post.selftext ?? '',
         });
       } catch (err) {
         console.error(`[${flow.name}] Error:`, err);
@@ -287,6 +301,7 @@ triggers.post('/on-comment-submit', async (c) => {
           commentId,
           subredditName,
           authorName: event.author?.name,
+          postBody: comment.body ?? '',
         });
       } catch (err) {
         console.error(`[${flow.name}] Error:`, err);

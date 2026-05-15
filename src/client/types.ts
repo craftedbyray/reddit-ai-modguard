@@ -60,7 +60,7 @@ export interface RFNode {
 export interface RFEdge {
   id: string;
   source: string;
-  sourceHandle: 'yes' | 'no';
+  sourceHandle: 'yes' | 'no' | 'next';
   target: string;
 }
 

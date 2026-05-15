@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import {
   ReactFlow,
   Background,
@@ -28,19 +28,34 @@ function toRFNodes(nodes: RFNode[]): Node[] {
   return nodes.map(n => ({ id: n.id, type: n.type, position: n.position, data: n.data, selected: false }));
 }
 
+function edgeColor(handle: 'yes' | 'no' | 'next'): string {
+  if (handle === 'yes') return '#10b981';
+  if (handle === 'no') return '#ef4444';
+  return '#94a3b8'; // 'next'
+}
+
+function edgeLabel(handle: 'yes' | 'no' | 'next'): string {
+  if (handle === 'yes') return 'Yes';
+  if (handle === 'no') return 'No';
+  return 'Then';
+}
+
 function toRFEdges(edges: RFEdge[]): Edge[] {
-  return edges.map(e => ({
-    id: e.id,
-    source: e.source,
-    sourceHandle: e.sourceHandle,
-    target: e.target,
-    label: e.sourceHandle === 'yes' ? 'Yes' : 'No',
-    labelStyle: { fill: e.sourceHandle === 'yes' ? '#10b981' : '#ef4444', fontWeight: 700, fontSize: 11 },
-    labelBgStyle: { fill: 'var(--bg-elevated)', fillOpacity: 0.9 },
-    style: { stroke: e.sourceHandle === 'yes' ? '#10b981' : '#ef4444', strokeWidth: 2 },
-    markerEnd: { type: MarkerType.ArrowClosed, color: e.sourceHandle === 'yes' ? '#10b981' : '#ef4444' },
-    animated: false,
-  }));
+  return edges.map(e => {
+    const color = edgeColor(e.sourceHandle);
+    return {
+      id: e.id,
+      source: e.source,
+      sourceHandle: e.sourceHandle,
+      target: e.target,
+      label: edgeLabel(e.sourceHandle),
+      labelStyle: { fill: color, fontWeight: 700, fontSize: 11 },
+      labelBgStyle: { fill: 'var(--bg-elevated)', fillOpacity: 0.9 },
+      style: { stroke: color, strokeWidth: 2 },
+      markerEnd: { type: MarkerType.ArrowClosed, color },
+      animated: false,
+    };
+  });
 }
 
 interface FlowEditorProps {
@@ -53,6 +68,45 @@ interface FlowEditorProps {
 export function FlowEditor({ flow, onFlowChange, onNodeSelect, selectedNodeId }: FlowEditorProps) {
   const [rfNodes, setRFNodes, onNodesChange] = useNodesState(toRFNodes(flow.nodes));
   const [rfEdges, setRFEdges, onEdgesChange] = useEdgesState(toRFEdges(flow.edges));
+  const isDragging = useRef(false);
+
+  // Sync external data/structural changes (e.g. NodePanel edits, new nodes/edges)
+  // into rfNodes/rfEdges. Skips when only positions changed (drag) to preserve
+  // React Flow's internal measurements and avoid edge endpoint loss.
+  useEffect(() => {
+    if (isDragging.current) return;
+    setRFNodes(prev => {
+      const prevById = new Map(prev.map(n => [n.id, n]));
+      const sameStructure = flow.nodes.length === prev.length && flow.nodes.every(fn => prevById.has(fn.id));
+      const dataChanged = flow.nodes.some(fn => {
+        const ex = prevById.get(fn.id);
+        return !ex || ex.data !== fn.data || ex.type !== fn.type;
+      });
+      if (sameStructure && !dataChanged) return prev;
+      return flow.nodes.map(fn => {
+        const existing = prevById.get(fn.id);
+        if (existing) return { ...existing, data: fn.data, type: fn.type } as Node;
+        return { id: fn.id, type: fn.type, position: fn.position, data: fn.data, selected: false } as Node;
+      });
+    });
+  }, [flow.nodes, setRFNodes]);
+
+  useEffect(() => {
+    if (isDragging.current) return;
+    setRFEdges(prev => {
+      const prevById = new Map(prev.map(e => [e.id, e]));
+      const sameStructure = flow.edges.length === prev.length && flow.edges.every(fe => {
+        const ex = prevById.get(fe.id);
+        return ex && ex.source === fe.source && ex.target === fe.target && ex.sourceHandle === fe.sourceHandle;
+      });
+      if (sameStructure) return prev;
+      const fresh = toRFEdges(flow.edges);
+      return fresh.map(fe => {
+        const existing = prevById.get(fe.id);
+        return existing ? { ...existing, ...fe } : fe;
+      });
+    });
+  }, [flow.edges, setRFEdges]);
 
   // Sync RF state → flow when nodes/edges change position
   const syncToFlow = useCallback((nodes: Node[], edges: Edge[]) => {
@@ -65,7 +119,7 @@ export function FlowEditor({ flow, onFlowChange, onNodeSelect, selectedNodeId }:
     const updatedEdges: RFEdge[] = edges.map(e => ({
       id: e.id,
       source: e.source,
-      sourceHandle: (e.sourceHandle ?? 'yes') as 'yes' | 'no',
+      sourceHandle: (e.sourceHandle ?? 'next') as 'yes' | 'no' | 'next',
       target: e.target,
     }));
     onFlowChange({ ...flow, nodes: updatedNodes, edges: updatedEdges });
@@ -78,17 +132,18 @@ export function FlowEditor({ flow, onFlowChange, onNodeSelect, selectedNodeId }:
     );
     if (existingEdge) return; // already connected
 
-    const handle = (params.sourceHandle ?? 'yes') as 'yes' | 'no';
+    const handle = (params.sourceHandle ?? 'next') as 'yes' | 'no' | 'next';
+    const color = edgeColor(handle);
     const newEdge: Edge = {
       id: `e-${params.source}-${handle}-${params.target}`,
       source: params.source!,
       sourceHandle: handle,
       target: params.target!,
-      label: handle === 'yes' ? 'Yes' : 'No',
-      labelStyle: { fill: handle === 'yes' ? '#10b981' : '#ef4444', fontWeight: 700, fontSize: 11 },
+      label: edgeLabel(handle),
+      labelStyle: { fill: color, fontWeight: 700, fontSize: 11 },
       labelBgStyle: { fill: 'var(--bg-elevated)', fillOpacity: 0.9 },
-      style: { stroke: handle === 'yes' ? '#10b981' : '#ef4444', strokeWidth: 2 },
-      markerEnd: { type: MarkerType.ArrowClosed, color: handle === 'yes' ? '#10b981' : '#ef4444' },
+      style: { stroke: color, strokeWidth: 2 },
+      markerEnd: { type: MarkerType.ArrowClosed, color },
     };
     const updated = addEdge(newEdge, rfEdges);
     setRFEdges(updated);
@@ -104,9 +159,16 @@ export function FlowEditor({ flow, onFlowChange, onNodeSelect, selectedNodeId }:
   }, [onNodeSelect]);
 
   // Track node drag end to persist positions
-  const onNodeDragStop = useCallback((_: React.MouseEvent, _node: Node, nodes: Node[]) => {
-    syncToFlow(nodes, rfEdges);
-  }, [rfEdges, syncToFlow]);
+  const onNodeDragStart = useCallback(() => {
+    isDragging.current = true;
+  }, []);
+
+  // Note: the third `nodes` arg of onNodeDragStop is ONLY the dragged subset,
+  // not the full node list. Use rfNodes to capture all current nodes.
+  const onNodeDragStop = useCallback(() => {
+    isDragging.current = false;
+    syncToFlow(rfNodes, rfEdges);
+  }, [rfNodes, rfEdges, syncToFlow]);
 
   const onEdgesDelete = useCallback((deleted: Edge[]) => {
     const remaining = rfEdges.filter(e => !deleted.find(d => d.id === e.id));
@@ -206,6 +268,7 @@ export function FlowEditor({ flow, onFlowChange, onNodeSelect, selectedNodeId }:
           onConnect={onConnect}
           onNodeClick={onNodeClick}
           onPaneClick={onPaneClick}
+          onNodeDragStart={onNodeDragStart}
           onNodeDragStop={onNodeDragStop}
           onEdgesDelete={onEdgesDelete}
           deleteKeyCode="Delete"

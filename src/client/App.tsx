@@ -191,8 +191,14 @@ export default function App() {
     setNewScope('both');
   }
 
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   function deleteFlow(id: string) {
-    if (!confirm('Delete this flow?')) return;
+    if (pendingDeleteId !== id) {
+      setPendingDeleteId(id);
+      setTimeout(() => setPendingDeleteId(curr => curr === id ? null : curr), 4000);
+      return;
+    }
+    setPendingDeleteId(null);
     const updated = flows.filter(f => f.id !== id);
     persist(updated);
     if (selectedFlowId === id) {
@@ -316,9 +322,11 @@ export default function App() {
                   key={flow.id}
                   flow={flow}
                   isSelected={flow.id === selectedFlowId}
+                  pendingDelete={pendingDeleteId === flow.id}
                   onSelect={() => { setSelectedFlowId(flow.id); setSelectedNodeId(null); }}
                   onToggle={() => toggleFlow(flow.id)}
                   onDelete={() => deleteFlow(flow.id)}
+                  onCancelDelete={() => setPendingDeleteId(null)}
                 />
               ))}
             </div>
@@ -329,6 +337,7 @@ export default function App() {
             <div style={{ flex: 1, display: 'flex', minWidth: 0 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <FlowEditor
+                  key={selectedFlow.id}
                   flow={selectedFlow}
                   onFlowChange={updateFlow}
                   onNodeSelect={setSelectedNodeId}
@@ -363,13 +372,15 @@ export default function App() {
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 function FlowListItem({
-  flow, isSelected, onSelect, onToggle, onDelete,
+  flow, isSelected, pendingDelete, onSelect, onToggle, onDelete, onCancelDelete,
 }: {
   flow: ModerationFlow;
   isSelected: boolean;
+  pendingDelete: boolean;
   onSelect: () => void;
   onToggle: () => void;
   onDelete: () => void;
+  onCancelDelete: () => void;
 }) {
   const checkCount = flow.nodes.filter(n => n.type === 'check').length;
   const actionCount = flow.nodes.filter(n => n.type === 'action').length;
@@ -378,6 +389,39 @@ function FlowListItem({
   const actionColors = [...new Set(
     flow.nodes.filter(n => n.type === 'action').map(n => ACTION_COLORS[(n.data as any).action])
   )].slice(0, 3);
+
+  if (pendingDelete) {
+    return (
+      <div style={{
+        padding: '10px 14px',
+        background: 'rgba(239,68,68,0.12)',
+        borderLeft: '2px solid #ef4444',
+      }}>
+        <p style={{ fontSize: 12, color: '#fca5a5', marginBottom: 8, lineHeight: 1.4 }}>
+          Delete <strong style={{ color: '#fff' }}>"{flow.name}"</strong>?
+        </p>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button
+            className="btn-primary"
+            style={{
+              fontSize: 11, padding: '5px 10px', flex: 1,
+              background: '#ef4444', borderColor: '#ef4444',
+            }}
+            onClick={onDelete}
+          >
+            Delete
+          </button>
+          <button
+            className="btn-ghost"
+            style={{ fontSize: 11, padding: '5px 10px', flex: 1 }}
+            onClick={onCancelDelete}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
