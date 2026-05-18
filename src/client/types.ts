@@ -7,7 +7,8 @@ export type ActionType =
   | 'flair'
   | 'warn'
   | 'ban'
-  | 'mute';
+  | 'mute'
+  | 'strike';
 
 export type ScopeType = 'post' | 'comment' | 'both';
 
@@ -21,6 +22,7 @@ export const ACTION_LABELS: Record<ActionType, string> = {
   warn:    'Warn (Modmail)',
   ban:     'Ban User',
   mute:    'Mute User',
+  strike:  'Strike (+1)',
 };
 
 export const ACTION_COLORS: Record<ActionType, string> = {
@@ -33,12 +35,22 @@ export const ACTION_COLORS: Record<ActionType, string> = {
   warn:    '#f59e0b',
   ban:     '#dc2626',
   mute:    '#6b7280',
+  strike:  '#ec4899',
 };
+
+export type CheckMode = 'llm' | 'strike';
+export type CompareOp = '>=' | '>' | '<=' | '<' | '==';
+
+export const STRIKE_LABEL_REGEX = /^[a-z0-9_-]{1,30}$/;
 
 // ── Node data types ─────────────────────────────────────────
 export interface CheckNodeData {
   label: string;
-  prompt: string;
+  mode?: CheckMode;           // default 'llm'
+  prompt?: string;            // for 'llm' mode
+  strikeLabel?: string;       // for 'strike' mode
+  threshold?: number;         // for 'strike' mode
+  operator?: CompareOp;       // for 'strike' mode
 }
 
 export interface ActionNodeData {
@@ -47,6 +59,7 @@ export interface ActionNodeData {
   flairText?: string;    // for 'flair' action
   warnMessage?: string;  // for 'warn' action
   banDuration?: number;  // for 'ban': days, 0 = permanent
+  strikeLabel?: string;  // for 'strike' action
 }
 
 // ── React Flow compatible node ───────────────────────────────

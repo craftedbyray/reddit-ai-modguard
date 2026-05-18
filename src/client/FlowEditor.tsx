@@ -213,7 +213,7 @@ export function FlowEditor({ flow, onFlowChange, onNodeSelect, selectedNodeId }:
     onNodeSelect(null);
   }
 
-  const actionOptions: ActionType[] = ['remove', 'spam', 'filter', 'lock', 'approve', 'flair', 'warn', 'ban', 'mute'];
+  const actionOptions: ActionType[] = ['remove', 'spam', 'filter', 'lock', 'approve', 'flair', 'warn', 'ban', 'mute', 'strike'];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>

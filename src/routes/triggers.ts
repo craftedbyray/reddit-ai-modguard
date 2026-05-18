@@ -13,10 +13,35 @@ const FLOWS_KEY = 'automod:flows';
 type ActionType = 'remove' | 'spam' | 'filter' | 'lock' | 'approve' | 'flair' | 'warn' | 'ban' | 'mute';
 type ScopeType = 'post' | 'comment' | 'both';
 
-interface CheckNodeData { label: string; prompt: string; }
+type CheckMode = 'llm' | 'strike';
+type CompareOp = '>=' | '>' | '<=' | '<' | '==';
+interface CheckNodeData {
+  label: string;
+  mode?: CheckMode;
+  prompt?: string;
+  strikeLabel?: string;
+  threshold?: number;
+  operator?: CompareOp;
+}
 interface ActionNodeData {
   action: ActionType; label: string;
   flairText?: string; warnMessage?: string; banDuration?: number;
+  strikeLabel?: string;
+}
+
+const STRIKES_LABELS_KEY = 'strike:_labels';
+const strikeKey = (label: string) => `strike:${label}`;
+const STRIKE_LABEL_REGEX = /^[a-z0-9_-]{1,30}$/;
+
+function compareScore(score: number, op: CompareOp | undefined, threshold: number | undefined): boolean {
+  const t = threshold ?? 0;
+  switch (op ?? '>=') {
+    case '>=': return score >= t;
+    case '>':  return score >  t;
+    case '<=': return score <= t;
+    case '<':  return score <  t;
+    case '==': return score === t;
+  }
 }
 interface RFNode {
   id: string; type: 'check' | 'action';
@@ -96,25 +121,42 @@ async function traverseFlow(
       continue;
     }
 
-    // Check node: call LLM and follow yes/no edge
+    // Check node: route by mode
     const data = current.data as CheckNodeData;
-    if (!data.prompt?.trim()) {
-      console.warn(`[${flow.name}] Node "${data.label}" has no prompt, skipping`);
-      return;
+    const mode: CheckMode = data.mode ?? 'llm';
+
+    let passed: boolean;
+
+    if (mode === 'strike') {
+      const slabel = (data.strikeLabel ?? '').trim();
+      if (!slabel || !STRIKE_LABEL_REGEX.test(slabel)) {
+        console.warn(`[${flow.name}] Strike check "${data.label}" has invalid label "${slabel}", skipping`);
+        return;
+      }
+      const score = context.authorName
+        ? ((await redis.zScore(strikeKey(slabel), context.authorName)) ?? 0)
+        : 0;
+      passed = compareScore(score, data.operator, data.threshold);
+      console.log(`[${flow.name}] strike-check "${data.label}" (${slabel}): score=${score} ${data.operator ?? '>='} ${data.threshold ?? 0} → ${passed}`);
+      lastReason = `User has ${score} ${slabel} strikes (threshold ${data.operator ?? '>='} ${data.threshold ?? 0})`;
+    } else {
+      if (!data.prompt?.trim()) {
+        console.warn(`[${flow.name}] Node "${data.label}" has no prompt, skipping`);
+        return;
+      }
+      let verdict: LLMVerdict;
+      try {
+        verdict = await callLLM(config.apiKey, config.baseUrl, config.modelName, data.prompt, content);
+      } catch (err) {
+        console.error(`[${flow.name}] LLM error at "${data.label}":`, err);
+        return;
+      }
+      console.log(`[${flow.name}] "${data.label}": violation=${verdict.violation} — ${verdict.reason}`);
+      lastReason = verdict.reason;
+      passed = verdict.violation;
     }
 
-    let verdict: LLMVerdict;
-    try {
-      verdict = await callLLM(config.apiKey, config.baseUrl, config.modelName, data.prompt, content);
-    } catch (err) {
-      console.error(`[${flow.name}] LLM error at "${data.label}":`, err);
-      return;
-    }
-
-    console.log(`[${flow.name}] "${data.label}": violation=${verdict.violation} — ${verdict.reason}`);
-    lastReason = verdict.reason;
-
-    const handle: 'yes' | 'no' = verdict.violation ? 'yes' : 'no';
+    const handle: 'yes' | 'no' = passed ? 'yes' : 'no';
     const edge = flow.edges.find(e => e.source === current!.id && e.sourceHandle === handle);
     if (!edge) return; // dead end, no action
 
@@ -205,6 +247,18 @@ async function executeAction(
           await reddit.muteUser({ subredditName: ctx.subredditName, username: ctx.authorName });
         }
         break;
+
+      case 'strike': {
+        const slabel = (data.strikeLabel ?? '').trim();
+        if (ctx.authorName && slabel && STRIKE_LABEL_REGEX.test(slabel)) {
+          await redis.zIncrBy(strikeKey(slabel), ctx.authorName, 1);
+          await redis.zAdd(STRIKES_LABELS_KEY, { member: slabel, score: Date.now() });
+          console.log(`[Action] strike +1 on u/${ctx.authorName} (label=${slabel})`);
+        } else {
+          console.warn(`[Action] strike skipped: invalid label "${slabel}" or no author`);
+        }
+        break;
+      }
     }
   } catch (err) {
     console.error(`[Action] ${data.action} failed:`, err);
