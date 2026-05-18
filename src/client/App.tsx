@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { FlowEditor } from './FlowEditor';
+import { StrikesDrawer } from './StrikesDrawer';
 import type { ModerationFlow, RFNode, ActionType, ScopeType } from './types';
-import { ACTION_LABELS, ACTION_COLORS } from './types';
+import { ACTION_LABELS, ACTION_COLORS, STRIKE_LABEL_REGEX } from './types';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -29,10 +30,12 @@ function NodePanel({
   flow,
   nodeId,
   onUpdate,
+  strikeLabels,
 }: {
   flow: ModerationFlow;
   nodeId: string;
   onUpdate: (updatedFlow: ModerationFlow) => void;
+  strikeLabels: string[];
 }) {
   const node = flow.nodes.find(n => n.id === nodeId);
   if (!node) return null;
@@ -71,15 +74,76 @@ function NodePanel({
       </FormField>
 
       {node.type === 'check' && (
-        <FormField label="Prompt">
-          <textarea
-            className="field"
-            value={data.prompt ?? ''}
-            placeholder="Describe what to detect…"
-            onChange={e => updateNodeData({ prompt: e.target.value })}
-            style={{ minHeight: 120 }}
-          />
-        </FormField>
+        <>
+          <FormField label="Mode">
+            <div className="seg">
+              {(['llm', 'strike'] as const).map(m => (
+                <button
+                  key={m}
+                  className={`seg-btn${(data.mode ?? 'llm') === m ? ' active' : ''}`}
+                  onClick={() => updateNodeData({ mode: m })}
+                >
+                  {m === 'llm' ? 'AI Prompt' : 'Strike Count'}
+                </button>
+              ))}
+            </div>
+          </FormField>
+
+          {(data.mode ?? 'llm') === 'llm' && (
+            <FormField label="Prompt">
+              <textarea
+                className="field"
+                value={data.prompt ?? ''}
+                placeholder="Describe what to detect…"
+                onChange={e => updateNodeData({ prompt: e.target.value })}
+                style={{ minHeight: 120 }}
+              />
+            </FormField>
+          )}
+
+          {data.mode === 'strike' && (
+            <>
+              <FormField label="Strike Label">
+                <select
+                  className="field"
+                  value={data.strikeLabel ?? ''}
+                  disabled={strikeLabels.length === 0}
+                  onChange={e => updateNodeData({ strikeLabel: e.target.value })}
+                >
+                  {strikeLabels.length === 0
+                    ? <option value="">— No labels yet, add in Strikes panel —</option>
+                    : <>
+                        <option value="">— pick a label —</option>
+                        {strikeLabels.map(l => <option key={l} value={l}>{l}</option>)}
+                      </>
+                  }
+                </select>
+              </FormField>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <FormField label="Operator">
+                  <select
+                    className="field"
+                    value={data.operator ?? '>='}
+                    onChange={e => updateNodeData({ operator: e.target.value })}
+                  >
+                    {(['>=', '>', '<=', '<', '=='] as const).map(op => (
+                      <option key={op} value={op}>{op}</option>
+                    ))}
+                  </select>
+                </FormField>
+                <FormField label="Threshold">
+                  <input
+                    className="field"
+                    type="number"
+                    min={0}
+                    value={data.threshold ?? 0}
+                    onChange={e => updateNodeData({ threshold: parseInt(e.target.value) || 0 })}
+                  />
+                </FormField>
+              </div>
+            </>
+          )}
+        </>
       )}
 
       {node.type === 'action' && (
@@ -133,6 +197,22 @@ function NodePanel({
               />
             </FormField>
           )}
+
+          {data.action === 'strike' && (
+            <FormField label="Strike Label">
+              <input
+                className="field"
+                value={data.strikeLabel ?? ''}
+                placeholder="e.g. spam"
+                onChange={e => updateNodeData({ strikeLabel: e.target.value.toLowerCase() })}
+              />
+              {data.strikeLabel && !STRIKE_LABEL_REGEX.test(data.strikeLabel) && (
+                <p style={{ fontSize: 10, color: '#ef4444', marginTop: 4 }}>
+                  Use a-z, 0-9, _ or -, max 30 chars
+                </p>
+              )}
+            </FormField>
+          )}
         </>
       )}
 
@@ -154,8 +234,10 @@ export default function App() {
   const [selectedFlowId, setSelectedFlowId] = useState<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [showNewForm, setShowNewForm] = useState(false);
+  const [strikesOpen, setStrikesOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [newScope, setNewScope] = useState<ScopeType>('both');
+  const [strikeLabels, setStrikeLabels] = useState<string[]>([]);
 
   useEffect(() => {
     fetch('/api/flows')
@@ -163,6 +245,10 @@ export default function App() {
       .then(d => setFlows(d.flows ?? []))
       .catch(() => {})
       .finally(() => setLoading(false));
+    fetch('/api/strikes/labels')
+      .then(r => r.json())
+      .then(d => setStrikeLabels((d.labels ?? []).map((l: { name: string }) => l.name)))
+      .catch(() => {});
   }, []);
 
   async function persist(list: ModerationFlow[]) {
@@ -252,6 +338,26 @@ export default function App() {
                 Save Flow
               </button>
             )}
+            <button
+              onClick={() => setStrikesOpen(true)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '5px 12px', borderRadius: 999,
+                border: '1px solid rgba(236,72,153,0.4)',
+                background: 'rgba(236,72,153,0.08)',
+                fontSize: 12, fontWeight: 600,
+                color: '#ec4899', fontFamily: 'var(--font-mono)',
+                cursor: 'pointer',
+                transition: 'all 150ms ease',
+              }}
+              title="Manage strike labels & rankings"
+            >
+              <span style={{
+                width: 6, height: 6, borderRadius: 999,
+                background: '#ec4899', boxShadow: '0 0 6px #ec4899',
+              }} />
+              Strikes
+            </button>
             <div style={{
               display: 'flex', alignItems: 'center', gap: 6,
               padding: '5px 12px', borderRadius: 999,
@@ -265,6 +371,17 @@ export default function App() {
             </div>
           </div>
         </header>
+
+        <StrikesDrawer
+          open={strikesOpen}
+          onClose={() => {
+            setStrikesOpen(false);
+            fetch('/api/strikes/labels')
+              .then(r => r.json())
+              .then(d => setStrikeLabels((d.labels ?? []).map((l: { name: string }) => l.name)))
+              .catch(() => {});
+          }}
+        />
 
         {/* Body */}
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
@@ -349,6 +466,7 @@ export default function App() {
                   flow={selectedFlow}
                   nodeId={selectedNodeId}
                   onUpdate={updateFlow}
+                  strikeLabels={strikeLabels}
                 />
               )}
             </div>
