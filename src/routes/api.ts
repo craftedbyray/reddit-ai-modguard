@@ -1,7 +1,32 @@
 import { Hono } from 'hono';
-import { redis } from '@devvit/web/server';
+import { redis, reddit, context } from '@devvit/web/server';
 
 export const api = new Hono();
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+
+api.get('/auth', async (c) => {
+  try {
+    const userId = context.userId;
+    const subredditName = context.subredditName;
+    if (!userId || !subredditName) {
+      return c.json({ isModerator: false });
+    }
+    const cacheKey = `auth:mod:${userId}:${subredditName}`;
+    const cached = await redis.get(cacheKey);
+    if (cached !== null) {
+      return c.json({ isModerator: cached === '1' });
+    }
+    const mods = await reddit.getModerators({ subredditName });
+    const isMod = mods.some((m: { id: string }) => m.id === userId);
+    await redis.set(cacheKey, isMod ? '1' : '0');
+    await redis.expire(cacheKey, 300);
+    return c.json({ isModerator: isMod });
+  } catch (err) {
+    console.error('Auth check failed:', err);
+    return c.json({ isModerator: false });
+  }
+});
 
 const FLOWS_KEY = 'automod:flows';
 const STRIKES_LABELS_KEY = 'strike:_labels';

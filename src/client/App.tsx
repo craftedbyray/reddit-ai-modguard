@@ -228,6 +228,7 @@ function NodePanel({
 // ── Main app ──────────────────────────────────────────────────────────────────
 
 export default function App() {
+  const [authStatus, setAuthStatus] = useState<'loading' | 'ok' | 'denied'>('loading');
   const [flows, setFlows] = useState<ModerationFlow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -240,16 +241,41 @@ export default function App() {
   const [strikeLabels, setStrikeLabels] = useState<string[]>([]);
 
   useEffect(() => {
-    fetch('/api/flows')
+    fetch('/api/auth')
       .then(r => r.json())
-      .then(d => setFlows(d.flows ?? []))
-      .catch(() => {})
-      .finally(() => setLoading(false));
-    fetch('/api/strikes/labels')
-      .then(r => r.json())
-      .then(d => setStrikeLabels((d.labels ?? []).map((l: { name: string }) => l.name)))
-      .catch(() => {});
+      .then(d => {
+        if (!d.isModerator) { setAuthStatus('denied'); return; }
+        setAuthStatus('ok');
+        fetch('/api/flows')
+          .then(r => r.json())
+          .then(d => setFlows(d.flows ?? []))
+          .catch(() => {})
+          .finally(() => setLoading(false));
+        fetch('/api/strikes/labels')
+          .then(r => r.json())
+          .then(d => setStrikeLabels((d.labels ?? []).map((l: { name: string }) => l.name)))
+          .catch(() => {});
+      })
+      .catch(() => setAuthStatus('denied'));
   }, []);
+
+  if (authStatus === 'loading') {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg)', color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)', fontSize: 13 }}>
+        Checking permissions…
+      </div>
+    );
+  }
+
+  if (authStatus === 'denied') {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg)', gap: 12 }}>
+        <span style={{ fontSize: 32 }}>🔒</span>
+        <p style={{ color: 'var(--fg)', fontWeight: 700, fontSize: 16 }}>Moderators only</p>
+        <p style={{ color: 'var(--fg-muted)', fontSize: 13, fontFamily: 'var(--font-mono)' }}>You don't have access to this tool.</p>
+      </div>
+    );
+  }
 
   async function persist(list: ModerationFlow[]) {
     setSaving(true);
