@@ -1,5 +1,10 @@
 import { Hono } from 'hono';
-import type { OnAppInstallRequest, OnPostSubmitRequest, OnCommentSubmitRequest, TriggerResponse } from '@devvit/web/shared';
+import type {
+  OnAppInstallRequest,
+  OnPostSubmitRequest,
+  OnCommentSubmitRequest,
+  TriggerResponse,
+} from '@devvit/web/shared';
 import { reddit, redis } from '@devvit/web/server';
 import { getAgentConfig } from '../core/settings';
 import type { T1, T3 } from '@devvit/shared-types/tid.js';
@@ -10,7 +15,16 @@ const FLOWS_KEY = 'automod:flows';
 
 // ── Types (mirrored from client, no import to keep server bundle clean) ───────
 
-type ActionType = 'remove' | 'spam' | 'filter' | 'lock' | 'approve' | 'flair' | 'warn' | 'ban' | 'mute';
+type ActionType =
+  | 'remove'
+  | 'spam'
+  | 'filter'
+  | 'lock'
+  | 'approve'
+  | 'flair'
+  | 'warn'
+  | 'ban'
+  | 'mute';
 type ScopeType = 'post' | 'comment' | 'both';
 
 type CheckMode = 'llm' | 'strike';
@@ -24,8 +38,11 @@ interface CheckNodeData {
   operator?: CompareOp;
 }
 interface ActionNodeData {
-  action: ActionType; label: string;
-  flairText?: string; warnMessage?: string; banDuration?: number;
+  action: ActionType;
+  label: string;
+  flairText?: string;
+  warnMessage?: string;
+  banDuration?: number;
   strikeLabel?: string;
 }
 
@@ -33,40 +50,70 @@ const STRIKES_LABELS_KEY = 'strike:_labels';
 const strikeKey = (label: string) => `strike:${label}`;
 const STRIKE_LABEL_REGEX = /^[a-z0-9_-]{1,30}$/;
 
-function compareScore(score: number, op: CompareOp | undefined, threshold: number | undefined): boolean {
+function compareScore(
+  score: number,
+  op: CompareOp | undefined,
+  threshold: number | undefined
+): boolean {
   const t = threshold ?? 0;
   switch (op ?? '>=') {
-    case '>=': return score >= t;
-    case '>':  return score >  t;
-    case '<=': return score <= t;
-    case '<':  return score <  t;
-    case '==': return score === t;
+    case '>=':
+      return score >= t;
+    case '>':
+      return score > t;
+    case '<=':
+      return score <= t;
+    case '<':
+      return score < t;
+    case '==':
+      return score === t;
   }
 }
 interface RFNode {
-  id: string; type: 'check' | 'action';
+  id: string;
+  type: 'check' | 'action';
   position: { x: number; y: number };
   data: CheckNodeData | ActionNodeData;
 }
-interface RFEdge { id: string; source: string; sourceHandle: 'yes' | 'no' | 'next'; target: string; }
+interface RFEdge {
+  id: string;
+  source: string;
+  sourceHandle: 'yes' | 'no' | 'next';
+  target: string;
+}
 interface ModerationFlow {
-  id: string; name: string; scope: ScopeType; isActive: boolean;
-  nodes: RFNode[]; edges: RFEdge[];
+  id: string;
+  name: string;
+  scope: ScopeType;
+  isActive: boolean;
+  nodes: RFNode[];
+  edges: RFEdge[];
 }
 
 // ── LLM call ─────────────────────────────────────────────────────────────────
 
-interface LLMVerdict { violation: boolean; reason: string; }
+interface LLMVerdict {
+  violation: boolean;
+  reason: string;
+}
 
 async function callLLM(
-  apiKey: string, baseUrl: string, modelName: string,
-  prompt: string, content: string
+  apiKey: string,
+  baseUrl: string,
+  modelName: string,
+  prompt: string,
+  content: string
 ): Promise<LLMVerdict> {
   const res = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
     body: JSON.stringify({
-      model: modelName, temperature: 0, max_tokens: 500,
+      model: modelName,
+      temperature: 0,
+      max_tokens: 500,
       response_format: { type: 'json_object' },
       messages: [
         {
@@ -85,9 +132,14 @@ async function callLLM(
   };
   const text = data.choices?.[0]?.message?.content ?? '';
   const finishReason = data.choices?.[0]?.finish_reason;
-  console.log(`[LLM] finish_reason=${finishReason} content=${JSON.stringify(text)}`);
+  console.log(
+    `[LLM] finish_reason=${finishReason} content=${JSON.stringify(text)}`
+  );
   const match = text.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error(`No JSON in LLM response (finish_reason=${finishReason}): ${text}`);
+  if (!match)
+    throw new Error(
+      `No JSON in LLM response (finish_reason=${finishReason}): ${text}`
+    );
   return JSON.parse(match[0]) as LLMVerdict;
 }
 
@@ -97,14 +149,24 @@ async function traverseFlow(
   flow: ModerationFlow,
   content: string,
   config: { apiKey: string; baseUrl: string; modelName: string },
-  context: { postId?: T3; commentId?: T1; subredditName: string; authorName?: string; postTitle?: string; postBody?: string }
+  context: {
+    postId?: T3;
+    commentId?: T1;
+    subredditName: string;
+    authorName?: string;
+    postTitle?: string;
+    postBody?: string;
+  }
 ): Promise<void> {
-  const nodeMap = new Map(flow.nodes.map(n => [n.id, n]));
+  const nodeMap = new Map(flow.nodes.map((n) => [n.id, n]));
 
   // Find root: node with no incoming edges
-  const hasIncoming = new Set(flow.edges.map(e => e.target));
-  const root = flow.nodes.find(n => !hasIncoming.has(n.id));
-  if (!root) { console.warn(`[${flow.name}] No root node found`); return; }
+  const hasIncoming = new Set(flow.edges.map((e) => e.target));
+  const root = flow.nodes.find((n) => !hasIncoming.has(n.id));
+  if (!root) {
+    console.warn(`[${flow.name}] No root node found`);
+    return;
+  }
 
   let current: RFNode | undefined = root;
   let depth = 0;
@@ -115,7 +177,9 @@ async function traverseFlow(
 
     if (current.type === 'action') {
       await executeAction(current.data as ActionNodeData, context, lastReason);
-      const nextEdge = flow.edges.find(e => e.source === current!.id && e.sourceHandle === 'next');
+      const nextEdge = flow.edges.find(
+        (e) => e.source === current!.id && e.sourceHandle === 'next'
+      );
       if (!nextEdge) return;
       current = nodeMap.get(nextEdge.target);
       continue;
@@ -130,34 +194,50 @@ async function traverseFlow(
     if (mode === 'strike') {
       const slabel = (data.strikeLabel ?? '').trim();
       if (!slabel || !STRIKE_LABEL_REGEX.test(slabel)) {
-        console.warn(`[${flow.name}] Strike check "${data.label}" has invalid label "${slabel}", skipping`);
+        console.warn(
+          `[${flow.name}] Strike check "${data.label}" has invalid label "${slabel}", skipping`
+        );
         return;
       }
       const score = context.authorName
         ? ((await redis.zScore(strikeKey(slabel), context.authorName)) ?? 0)
         : 0;
       passed = compareScore(score, data.operator, data.threshold);
-      console.log(`[${flow.name}] strike-check "${data.label}" (${slabel}): score=${score} ${data.operator ?? '>='} ${data.threshold ?? 0} → ${passed}`);
+      console.log(
+        `[${flow.name}] strike-check "${data.label}" (${slabel}): score=${score} ${data.operator ?? '>='} ${data.threshold ?? 0} → ${passed}`
+      );
       lastReason = `User has ${score} ${slabel} strikes (threshold ${data.operator ?? '>='} ${data.threshold ?? 0})`;
     } else {
       if (!data.prompt?.trim()) {
-        console.warn(`[${flow.name}] Node "${data.label}" has no prompt, skipping`);
+        console.warn(
+          `[${flow.name}] Node "${data.label}" has no prompt, skipping`
+        );
         return;
       }
       let verdict: LLMVerdict;
       try {
-        verdict = await callLLM(config.apiKey, config.baseUrl, config.modelName, data.prompt, content);
+        verdict = await callLLM(
+          config.apiKey,
+          config.baseUrl,
+          config.modelName,
+          data.prompt,
+          content
+        );
       } catch (err) {
         console.error(`[${flow.name}] LLM error at "${data.label}":`, err);
         return;
       }
-      console.log(`[${flow.name}] "${data.label}": violation=${verdict.violation} — ${verdict.reason}`);
+      console.log(
+        `[${flow.name}] "${data.label}": violation=${verdict.violation} — ${verdict.reason}`
+      );
       lastReason = verdict.reason;
       passed = verdict.violation;
     }
 
     const handle: 'yes' | 'no' = passed ? 'yes' : 'no';
-    const edge = flow.edges.find(e => e.source === current!.id && e.sourceHandle === handle);
+    const edge = flow.edges.find(
+      (e) => e.source === current!.id && e.sourceHandle === handle
+    );
     if (!edge) return; // dead end, no action
 
     current = nodeMap.get(edge.target);
@@ -168,7 +248,14 @@ async function traverseFlow(
 
 async function executeAction(
   data: ActionNodeData,
-  ctx: { postId?: T3; commentId?: T1; subredditName: string; authorName?: string; postTitle?: string; postBody?: string },
+  ctx: {
+    postId?: T3;
+    commentId?: T1;
+    subredditName: string;
+    authorName?: string;
+    postTitle?: string;
+    postBody?: string;
+  },
   reason: string
 ) {
   const thingId = ctx.commentId ?? ctx.postId;
@@ -190,13 +277,23 @@ async function executeAction(
         break;
 
       case 'filter':
-        if (ctx.postId)    { const p = await reddit.getPostById(ctx.postId);       await p.filter(); }
-        else if (ctx.commentId) { const c = await reddit.getCommentById(ctx.commentId); await c.filter(); }
+        if (ctx.postId) {
+          const p = await reddit.getPostById(ctx.postId);
+          await p.filter();
+        } else if (ctx.commentId) {
+          const c = await reddit.getCommentById(ctx.commentId);
+          await c.filter();
+        }
         break;
 
       case 'lock':
-        if (ctx.postId)    { const p = await reddit.getPostById(ctx.postId);       await p.lock(); }
-        else if (ctx.commentId) { const c = await reddit.getCommentById(ctx.commentId); await c.lock(); }
+        if (ctx.postId) {
+          const p = await reddit.getPostById(ctx.postId);
+          await p.lock();
+        } else if (ctx.commentId) {
+          const c = await reddit.getCommentById(ctx.commentId);
+          await c.lock();
+        }
         break;
 
       case 'approve':
@@ -236,7 +333,10 @@ async function executeAction(
           await reddit.banUser({
             subredditName: ctx.subredditName,
             username: ctx.authorName,
-            duration: data.banDuration && data.banDuration > 0 ? data.banDuration : undefined,
+            duration:
+              data.banDuration && data.banDuration > 0
+                ? data.banDuration
+                : undefined,
             note: 'Banned by AI Mod Guardian',
           });
         }
@@ -244,7 +344,10 @@ async function executeAction(
 
       case 'mute':
         if (ctx.authorName) {
-          await reddit.muteUser({ subredditName: ctx.subredditName, username: ctx.authorName });
+          await reddit.muteUser({
+            subredditName: ctx.subredditName,
+            username: ctx.authorName,
+          });
         }
         break;
 
@@ -252,10 +355,17 @@ async function executeAction(
         const slabel = (data.strikeLabel ?? '').trim();
         if (ctx.authorName && slabel && STRIKE_LABEL_REGEX.test(slabel)) {
           await redis.zIncrBy(strikeKey(slabel), ctx.authorName, 1);
-          await redis.zAdd(STRIKES_LABELS_KEY, { member: slabel, score: Date.now() });
-          console.log(`[Action] strike +1 on u/${ctx.authorName} (label=${slabel})`);
+          await redis.zAdd(STRIKES_LABELS_KEY, {
+            member: slabel,
+            score: Date.now(),
+          });
+          console.log(
+            `[Action] strike +1 on u/${ctx.authorName} (label=${slabel})`
+          );
         } else {
-          console.warn(`[Action] strike skipped: invalid label "${slabel}" or no author`);
+          console.warn(
+            `[Action] strike skipped: invalid label "${slabel}" or no author`
+          );
         }
         break;
       }
@@ -288,14 +398,16 @@ async function loadFlows(scope: 'post' | 'comment'): Promise<ModerationFlow[]> {
   const raw = await redis.get(FLOWS_KEY);
   if (!raw) return [];
   const all: ModerationFlow[] = JSON.parse(raw);
-  return all.filter(f => f.isActive && (f.scope === scope || f.scope === 'both'));
+  return all.filter(
+    (f) => f.isActive && (f.scope === scope || f.scope === 'both')
+  );
 }
 
 // ── Trigger handlers ──────────────────────────────────────────────────────────
 
 triggers.post('/on-app-install', async (c) => {
   const input = await c.req.json<OnAppInstallRequest>();
-  console.log('[rz-mod] Installed to r/' + input.subreddit?.name);
+  console.log('[ai-guard] Installed to r/' + input.subreddit?.name);
   return c.json<TriggerResponse>({}, 200);
 });
 
@@ -340,7 +452,9 @@ triggers.post('/on-comment-submit', async (c) => {
   const subredditName = event.subreddit?.name ?? '';
   if (!comment?.id || !subredditName) return c.json<TriggerResponse>({}, 200);
 
-  const commentId = (comment.id.startsWith('t1_') ? comment.id : `t1_${comment.id}`) as T1;
+  const commentId = (
+    comment.id.startsWith('t1_') ? comment.id : `t1_${comment.id}`
+  ) as T1;
   const content = comment.body ?? '';
   console.log(`[AI Engine] Comment: ${comment.id}`);
 

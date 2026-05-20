@@ -1,6 +1,6 @@
 {
   "$schema": "https://developers.reddit.com/schema/config-file.v1.json",
-  "name": "rz-mod",
+  "name": "ai-guard",
   "server": {
     "dir": "dist/server",
     "entry": "index.cjs"
@@ -62,7 +62,7 @@
     }
   },
   "dev": {
-    "subreddit": "rz_mod_dev"
+    "subreddit": "ai_guard_dev"
   },
   "settings": {
     "subreddit": {
