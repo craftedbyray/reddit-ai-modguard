@@ -37,7 +37,7 @@
     "@types/react-dom": "^19.2.3",
     "autoprefixer": "^10.5.0",
     "eslint": "9.39.2",
-    "globals": "17.2.0",
+    "globals": "17.6.0",
     "postcss": "^8.5.14",
     "prettier": "3.8.1",
     "tailwindcss": "^4.2.4",
