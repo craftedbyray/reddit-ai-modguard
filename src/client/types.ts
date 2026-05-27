@@ -87,7 +87,7 @@ export interface LogEntry {
   flowName: string;
   violation: boolean;
   reason: string;
-  action: string | null;
+  actions: string[];
   contentType: 'post' | 'comment';
 }
 

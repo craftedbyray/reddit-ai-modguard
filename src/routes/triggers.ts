@@ -168,7 +168,7 @@ async function traverseFlow(
     flowName: flow.name,
     violation: false,
     reason: '',
-    action: null as string | null,
+    actions: [] as string[],
     contentType: (context.commentId ? 'comment' : 'post') as 'post' | 'comment',
   };
 
@@ -192,7 +192,7 @@ async function traverseFlow(
 
       if (current.type === 'action') {
         const actionData = current.data as ActionNodeData;
-        if (log.action === null) log.action = actionData.action;
+        log.actions.push(actionData.action);
         await executeAction(actionData, context, lastReason);
         const nextEdge = flow.edges.find(
           (e) => e.source === current!.id && e.sourceHandle === 'next'

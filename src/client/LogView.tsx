@@ -1,8 +1,27 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Component } from 'react';
+import type { ReactNode } from 'react';
 import { ACTION_COLORS, ACTION_LABELS } from './types';
 import type { ActionType, LogEntry } from './types';
 
+class LogErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
+  state = { error: null };
+  static getDerivedStateFromError(e: Error) { return { error: e.message }; }
+  render() {
+    if (this.state.error) return (
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8, color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)', fontSize: 12 }}>
+        <span style={{ color: 'var(--red)' }}>⚠ Log error</span>
+        <span>{this.state.error}</span>
+      </div>
+    );
+    return this.props.children;
+  }
+}
+
 export function LogView() {
+  return <LogErrorBoundary><LogViewInner /></LogErrorBoundary>;
+}
+
+function LogViewInner() {
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -31,16 +50,16 @@ export function LogView() {
 
   const violations = entries.filter(e => e.violation).length;
   const clean = entries.length - violations;
-  const actioned = entries.filter(e => e.action !== null).length;
+  const actioned = entries.filter(e => e.actions.length > 0).length;
 
-  const actionTypes = [...new Set(entries.map(e => e.action).filter(Boolean))] as ActionType[];
+  const actionTypes = [...new Set(entries.flatMap(e => e.actions))] as ActionType[];
 
   const filtered = entries.filter(e => {
     const q = search.toLowerCase();
     const matchSearch = !q || e.author.toLowerCase().includes(q) || e.preview.toLowerCase().includes(q);
     const matchAction =
       filterAction === 'all' ||
-      (filterAction === 'none' ? e.action === null : e.action === filterAction);
+      (filterAction === 'none' ? e.actions.length === 0 : e.actions.includes(filterAction));
     return matchSearch && matchAction;
   });
 
@@ -154,9 +173,11 @@ export function LogView() {
                       {e.violation ? 'Violation' : 'Clean'}
                     </span>
                   </td>
-                  <td style={{ padding: '10px 14px', whiteSpace: 'nowrap', verticalAlign: 'middle' }}>
-                    {e.action
-                      ? <ActionBadge action={e.action as ActionType} />
+                  <td style={{ padding: '10px 14px', verticalAlign: 'middle' }}>
+                    {e.actions.length > 0
+                      ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                          {e.actions.map((a, i) => <ActionBadge key={i} action={a as ActionType} />)}
+                        </div>
                       : <span style={{ fontSize: 11, color: 'rgba(138,143,152,0.35)', fontFamily: 'var(--font-mono)' }}>—</span>
                     }
                   </td>

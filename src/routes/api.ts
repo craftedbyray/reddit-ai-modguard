@@ -155,7 +155,16 @@ api.get('/modlog', async (c) => {
     const hasMore = raw.length > LOG_PAGE_SIZE;
     const slice = (hasMore ? raw.slice(0, LOG_PAGE_SIZE) : raw) as { member: string; score: number }[];
     const entries = slice
-      .map((item) => { try { return JSON.parse(item.member); } catch { return null; } })
+      .map((item) => {
+        try {
+          const entry = JSON.parse(item.member);
+          // normalize old single-action format
+          if (!Array.isArray(entry.actions)) {
+            entry.actions = entry.action != null ? [entry.action] : [];
+          }
+          return entry;
+        } catch { return null; }
+      })
       .filter(Boolean);
     return c.json({ entries, page, hasMore });
   } catch (err) {
