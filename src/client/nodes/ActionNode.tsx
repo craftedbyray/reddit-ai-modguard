@@ -1,4 +1,5 @@
 import { Handle, Position } from '@xyflow/react';
+import type { CSSProperties } from 'react';
 import type { ActionNodeData } from '../types';
 import { ACTION_LABELS, ACTION_COLORS } from '../types';
 
@@ -55,7 +56,7 @@ export function ActionNode({ data, selected }: { data: ActionNodeData; selected:
   );
 }
 
-const handleStyle: React.CSSProperties = {
+const handleStyle: CSSProperties = {
   width: 10,
   height: 10,
   background: 'var(--border-strong)',

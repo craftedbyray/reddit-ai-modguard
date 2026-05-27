@@ -24,7 +24,8 @@ type ActionType =
   | 'flair'
   | 'warn'
   | 'ban'
-  | 'mute';
+  | 'mute'
+  | 'strike';
 type ScopeType = 'post' | 'comment' | 'both';
 
 type CheckMode = 'llm' | 'strike';
@@ -312,10 +313,10 @@ async function executeAction(
       case 'filter':
         if (ctx.postId) {
           const p = await reddit.getPostById(ctx.postId);
-          await p.filter();
+          await p.filter(undefined, undefined);
         } else if (ctx.commentId) {
           const c = await reddit.getCommentById(ctx.commentId);
-          await c.filter();
+          await c.filter(undefined, undefined);
         }
         break;
 
@@ -366,10 +367,7 @@ async function executeAction(
           await reddit.banUser({
             subredditName: ctx.subredditName,
             username: ctx.authorName,
-            duration:
-              data.banDuration && data.banDuration > 0
-                ? data.banDuration
-                : undefined,
+            ...(data.banDuration && data.banDuration > 0 ? { duration: data.banDuration } : {}),
             note: 'Banned by AI Mod Guardian',
           });
         }
@@ -464,7 +462,7 @@ triggers.post('/on-post-submit', async (c) => {
         await traverseFlow(flow, content, config, {
           postId,
           subredditName,
-          authorName: event.author?.name,
+          ...(event.author?.name ? { authorName: event.author.name } : {}),
           postTitle: post.title,
           postBody: post.selftext ?? '',
         });
@@ -501,7 +499,7 @@ triggers.post('/on-comment-submit', async (c) => {
         await traverseFlow(flow, content, config, {
           commentId,
           subredditName,
-          authorName: event.author?.name,
+          ...(event.author?.name ? { authorName: event.author.name } : {}),
           postBody: comment.body ?? '',
         });
       } catch (err) {

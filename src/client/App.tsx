@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
+import type { ReactNode } from 'react';
 import { FlowEditor } from './FlowEditor';
 import { StrikesDrawer } from './StrikesDrawer';
 import { LogView } from './LogView';
-import type { ModerationFlow, RFNode, ActionType, ScopeType } from './types';
+import type { ModerationFlow, ActionNodeData, CheckNodeData, ActionType, ScopeType } from './types';
 import { ACTION_LABELS, ACTION_COLORS, STRIKE_LABEL_REGEX } from './types';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -48,7 +49,7 @@ function NodePanel({
     onUpdate({ ...flow, nodes: updatedNodes });
   }
 
-  const data = node.data as any;
+  const data = node.data as CheckNodeData & ActionNodeData;
 
   return (
     <div style={{
@@ -302,7 +303,7 @@ export default function App() {
     if (!newName.trim()) return;
     const flow = makeStarterFlow(newName.trim(), newScope);
     const updated = [...flows, flow];
-    persist(updated);
+    void persist(updated);
     setSelectedFlowId(flow.id);
     setSelectedNodeId(null);
     setShowNewForm(false);
@@ -318,7 +319,7 @@ export default function App() {
     }
     setPendingDeleteId(null);
     const updated = flows.filter(f => f.id !== id);
-    persist(updated);
+    void persist(updated);
     if (selectedFlowId === id) {
       setSelectedFlowId(null);
       setSelectedNodeId(null);
@@ -326,11 +327,11 @@ export default function App() {
   }
 
   function toggleFlow(id: string) {
-    persist(flows.map(f => f.id === id ? { ...f, isActive: !f.isActive } : f));
+    void persist(flows.map(f => f.id === id ? { ...f, isActive: !f.isActive } : f));
   }
 
   function saveFlow() {
-    persist(flows);
+    void persist(flows);
   }
 
   const selectedFlow = flows.find(f => f.id === selectedFlowId) ?? null;
@@ -558,7 +559,7 @@ function FlowListItem({
 
   // Get unique action colors for the flow
   const actionColors = [...new Set(
-    flow.nodes.filter(n => n.type === 'action').map(n => ACTION_COLORS[(n.data as any).action])
+    flow.nodes.filter(n => n.type === 'action').map(n => ACTION_COLORS[(n.data as ActionNodeData).action])
   )].slice(0, 3);
 
   if (pendingDelete) {
@@ -649,7 +650,7 @@ function FlowListItem({
   );
 }
 
-function FormField({ label, children }: { label: string; children: React.ReactNode }) {
+function FormField({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
       <label style={{

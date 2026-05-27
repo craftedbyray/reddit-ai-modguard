@@ -71,7 +71,7 @@ menu.post('/mop-post', async (c) => {
 menu.post('/manage-agents', async (c) => {
   const request = await c.req.json<MenuItemRequest>();
   try {
-    const subreddit = await reddit.getSubredditInfoById(request.targetId);
+    const subreddit = await reddit.getSubredditInfoById(request.targetId as `t5_${string}`);
     
     const post = await reddit.submitCustomPost({
       // We pass the subreddit name as fetched from the targetId
@@ -95,12 +95,12 @@ menu.post('/manage-agents', async (c) => {
       },
       200
     );
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Failed to create dashboard post', error);
     return c.json<UiResponse>(
       {
         showToast: {
-          text: `Failed: ${error.message || 'Unknown error'}`,
+          text: `Failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
         },
       },
       200

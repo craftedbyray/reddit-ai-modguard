@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, type CSSProperties } from 'react';
 import { STRIKE_LABEL_REGEX } from './types';
 
 interface LabelInfo { name: string; userCount: number; }
@@ -35,11 +35,11 @@ export function StrikesDrawer({ open, onClose }: { open: boolean; onClose: () =>
   }, []);
 
   useEffect(() => {
-    if (open) refreshLabels();
+    if (open) { void refreshLabels(); }
   }, [open, refreshLabels]);
 
   useEffect(() => {
-    if (selected) refreshRanking(selected);
+    if (selected) { void refreshRanking(selected); }
     else setRanking([]);
   }, [selected, refreshRanking]);
 
@@ -196,7 +196,7 @@ export function StrikesDrawer({ open, onClose }: { open: boolean; onClose: () =>
                       {l.userCount}
                     </span>
                     <button
-                      onClick={e => { e.stopPropagation(); deleteLabel(l.name); }}
+                      onClick={e => { e.stopPropagation(); void deleteLabel(l.name); }}
                       className="icon-btn del"
                       style={{ padding: 4 }}
                       title={isPendingDelete ? 'Click again to confirm' : 'Delete label'}
@@ -290,7 +290,7 @@ export function StrikesDrawer({ open, onClose }: { open: boolean; onClose: () =>
   );
 }
 
-const sectionHeading: React.CSSProperties = {
+const sectionHeading: CSSProperties = {
   fontSize: 10, fontWeight: 700,
   color: 'var(--fg-muted)',
   textTransform: 'uppercase', letterSpacing: '0.08em',

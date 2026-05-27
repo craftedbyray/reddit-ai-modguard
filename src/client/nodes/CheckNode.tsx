@@ -1,4 +1,5 @@
 import { Handle, Position } from '@xyflow/react';
+import type { CSSProperties } from 'react';
 import type { CheckNodeData } from '../types';
 
 export function CheckNode({ data, selected }: { data: CheckNodeData; selected: boolean }) {
@@ -60,7 +61,7 @@ export function CheckNode({ data, selected }: { data: CheckNodeData; selected: b
   );
 }
 
-const handleStyle: React.CSSProperties = {
+const handleStyle: CSSProperties = {
   width: 10,
   height: 10,
   background: 'var(--border-strong)',

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, type MouseEvent as ReactMouseEvent } from 'react';
 import {
   ReactFlow,
   Background,
@@ -16,16 +16,18 @@ import {
 import '@xyflow/react/dist/style.css';
 import { CheckNode } from './nodes/CheckNode';
 import { ActionNode } from './nodes/ActionNode';
-import type { ModerationFlow, RFNode, RFEdge, ActionType } from './types';
+import type { ModerationFlow, RFNode, RFEdge, ActionType, CheckNodeData, ActionNodeData } from './types';
 import { ACTION_LABELS } from './types';
 
 const nodeTypes = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   check: CheckNode as any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   action: ActionNode as any,
 };
 
 function toRFNodes(nodes: RFNode[]): Node[] {
-  return nodes.map(n => ({ id: n.id, type: n.type, position: n.position, data: n.data, selected: false }));
+  return nodes.map(n => ({ id: n.id, type: n.type, position: n.position, data: n.data as unknown as Record<string, unknown>, selected: false }));
 }
 
 function edgeColor(handle: 'yes' | 'no' | 'next'): string {
@@ -80,13 +82,13 @@ export function FlowEditor({ flow, onFlowChange, onNodeSelect, selectedNodeId }:
       const sameStructure = flow.nodes.length === prev.length && flow.nodes.every(fn => prevById.has(fn.id));
       const dataChanged = flow.nodes.some(fn => {
         const ex = prevById.get(fn.id);
-        return !ex || ex.data !== fn.data || ex.type !== fn.type;
+        return !ex || ex.data !== (fn.data as unknown as Record<string, unknown>) || ex.type !== fn.type;
       });
       if (sameStructure && !dataChanged) return prev;
       return flow.nodes.map(fn => {
         const existing = prevById.get(fn.id);
-        if (existing) return { ...existing, data: fn.data, type: fn.type } as Node;
-        return { id: fn.id, type: fn.type, position: fn.position, data: fn.data, selected: false } as Node;
+        if (existing) return { ...existing, data: fn.data as unknown as Record<string, unknown>, type: fn.type } as unknown as Node;
+        return { id: fn.id, type: fn.type, position: fn.position, data: fn.data as unknown as Record<string, unknown>, selected: false } as unknown as Node;
       });
     });
   }, [flow.nodes, setRFNodes]);
@@ -114,7 +116,7 @@ export function FlowEditor({ flow, onFlowChange, onNodeSelect, selectedNodeId }:
       id: n.id,
       type: n.type as 'check' | 'action',
       position: n.position,
-      data: n.data as any,
+      data: n.data as unknown as CheckNodeData | ActionNodeData,
     }));
     const updatedEdges: RFEdge[] = edges.map(e => ({
       id: e.id,
@@ -150,7 +152,7 @@ export function FlowEditor({ flow, onFlowChange, onNodeSelect, selectedNodeId }:
     syncToFlow(rfNodes, updated);
   }, [rfEdges, rfNodes, setRFEdges, syncToFlow]);
 
-  const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
+  const onNodeClick = useCallback((_: ReactMouseEvent, node: Node) => {
     onNodeSelect(node.id);
   }, [onNodeSelect]);
 

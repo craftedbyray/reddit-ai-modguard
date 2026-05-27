@@ -10,7 +10,7 @@ export default defineConfig([
     files: ['src/**/*.{ts,tsx,mjs,cjs,js}'],
     languageOptions: {
       ecmaVersion: 2023,
-      globals: globals.node,
+      globals: { ...globals.node, ...globals.browser },
       parserOptions: {
         project: ['./tsconfig.json'],
         tsconfigRootDir: import.meta.dirname,

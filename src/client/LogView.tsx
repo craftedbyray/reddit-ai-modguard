@@ -4,9 +4,9 @@ import { ACTION_COLORS, ACTION_LABELS } from './types';
 import type { ActionType, LogEntry } from './types';
 
 class LogErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
-  state = { error: null };
+  override state = { error: null };
   static getDerivedStateFromError(e: Error) { return { error: e.message }; }
-  render() {
+  override render() {
     if (this.state.error) return (
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8, color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)', fontSize: 12 }}>
         <span style={{ color: 'var(--red)' }}>⚠ Log error</span>
@@ -223,7 +223,7 @@ function StatCard({ label, value, color }: { label: string; value: number; color
   );
 }
 
-function Chip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+function Chip({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
   return (
     <button
       onClick={onClick}
@@ -258,7 +258,7 @@ function ActionBadge({ action }: { action: ActionType }) {
   );
 }
 
-function Empty({ children }: { children: React.ReactNode }) {
+function Empty({ children }: { children: ReactNode }) {
   return (
     <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--fg-muted)', fontSize: 13 }}>{children}</div>
   );
