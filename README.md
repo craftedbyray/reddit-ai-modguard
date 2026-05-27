@@ -35,9 +35,9 @@ Go to **Mod Tools → Apps → AI Guard → App Settings** and fill in:
 
 | Setting | Description |
 |---|---|
-| API Key | Your OpenAI key (`sk-...`) or Aliyun DashScope key |
-| Base URL | Leave default for OpenAI. For Qwen: `https://dashscope.aliyuncs.com/compatible-mode/v1` |
-| Model Name | e.g. `gpt-4o-mini`, `qwen-plus`, `qwen-turbo` |
+| API Key | Your OpenAI key (`sk-...`) or Google AI Studio key |
+| Base URL | Leave default for OpenAI. For Gemini: `https://generativelanguage.googleapis.com/v1beta/openai` |
+| Model Name | e.g. `gpt-4o-mini`, `gemini-2.0-flash`, `gemini-1.5-pro` |
 
 ### 3. Open the Flow Editor
 Go to your subreddit → **Mod Tools** → **Manage Moderation Flows**.
@@ -93,7 +93,7 @@ The Strikes panel shows a live ranking of users by strike count under each label
 
 Any OpenAI-compatible API works:
 - **OpenAI** — `gpt-4o`, `gpt-4o-mini`, etc.
-- **Aliyun DashScope / Qwen** — `qwen-plus`, `qwen-turbo`, `qwen-max`
+- **Google Gemini** — `gemini-2.0-flash`, `gemini-1.5-pro`, etc. (via OpenAI-compatible endpoint)
 - Any other provider with an OpenAI-compatible endpoint
 
 ---
