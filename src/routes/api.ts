@@ -145,16 +145,21 @@ api.delete('/strikes/:label/users/:user', async (c) => {
 // ── Mod Log ───────────────────────────────────────────────────────────────────
 
 const MOD_LOG_KEY = 'modlog';
+const LOG_PAGE_SIZE = 50;
 
 api.get('/modlog', async (c) => {
   try {
-    const raw = await redis.zRange(MOD_LOG_KEY, 0, 199, { by: 'rank', reverse: true });
-    const entries = (raw as { member: string; score: number }[])
+    const page = Math.max(0, parseInt(c.req.query('page') ?? '0') || 0);
+    const offset = page * LOG_PAGE_SIZE;
+    const raw = await redis.zRange(MOD_LOG_KEY, offset, offset + LOG_PAGE_SIZE, { by: 'rank', reverse: true });
+    const hasMore = raw.length > LOG_PAGE_SIZE;
+    const slice = (hasMore ? raw.slice(0, LOG_PAGE_SIZE) : raw) as { member: string; score: number }[];
+    const entries = slice
       .map((item) => { try { return JSON.parse(item.member); } catch { return null; } })
       .filter(Boolean);
-    return c.json({ entries });
+    return c.json({ entries, page, hasMore });
   } catch (err) {
     console.error('Error fetching mod log:', err);
-    return c.json({ entries: [], error: 'Failed to load log' }, 500);
+    return c.json({ entries: [], page: 0, hasMore: false, error: 'Failed to load log' }, 500);
   }
 });

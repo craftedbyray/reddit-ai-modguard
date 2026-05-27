@@ -7,23 +7,30 @@ export function LogView() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterAction, setFilterAction] = useState<string>('all');
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
 
-  const fetchLog = useCallback(() => {
-    fetch('/api/modlog')
+  const fetchLog = useCallback((p: number) => {
+    setLoading(true);
+    fetch(`/api/modlog?page=${p}`)
       .then(r => r.json())
-      .then(d => { setEntries(d.entries ?? []); setLoading(false); })
+      .then(d => {
+        setEntries(d.entries ?? []);
+        setHasMore(d.hasMore ?? false);
+        setLoading(false);
+      })
       .catch(() => setLoading(false));
   }, []);
 
   useEffect(() => {
-    fetchLog();
-    const id = setInterval(fetchLog, 15000);
+    fetchLog(page);
+    if (page !== 0) return;
+    const id = setInterval(() => fetchLog(0), 15000);
     return () => clearInterval(id);
-  }, [fetchLog]);
+  }, [fetchLog, page]);
 
-  const total = entries.length;
   const violations = entries.filter(e => e.violation).length;
-  const clean = total - violations;
+  const clean = entries.length - violations;
   const actioned = entries.filter(e => e.action !== null).length;
 
   const actionTypes = [...new Set(entries.map(e => e.action).filter(Boolean))] as ActionType[];
@@ -53,7 +60,6 @@ export function LogView() {
 
       {/* Stats */}
       <div style={{ display: 'flex', gap: 12, flexShrink: 0 }}>
-        <StatCard label="Total Logged" value={total} color="var(--fg)" />
         <StatCard label="Violations" value={violations} color="var(--red)" />
         <StatCard label="Clean" value={clean} color="var(--green)" />
         <StatCard label="Actions Taken" value={actioned} color="var(--accent)" />
@@ -75,7 +81,7 @@ export function LogView() {
           </Chip>
         ))}
         <Chip active={filterAction === 'none'} onClick={() => setFilterAction('none')}>No Action</Chip>
-        <button className="btn-ghost" style={{ marginLeft: 'auto', fontSize: 12, padding: '6px 14px' }} onClick={fetchLog}>
+        <button className="btn-ghost" style={{ marginLeft: 'auto', fontSize: 12, padding: '6px 14px' }} onClick={() => fetchLog(page)}>
           Refresh
         </button>
       </div>
@@ -159,6 +165,29 @@ export function LogView() {
             </tbody>
           </table>
         )}
+      </div>
+
+      {/* Pagination */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+        <button
+          className="btn-ghost"
+          style={{ fontSize: 12, padding: '6px 16px', opacity: page === 0 ? 0.3 : 1 }}
+          disabled={page === 0 || loading}
+          onClick={() => setPage(p => p - 1)}
+        >
+          ← Prev
+        </button>
+        <span style={{ fontSize: 11, color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)' }}>
+          Page {page + 1}{!hasMore && entries.length < 50 ? '' : ''}
+        </span>
+        <button
+          className="btn-ghost"
+          style={{ fontSize: 12, padding: '6px 16px', opacity: !hasMore ? 0.3 : 1 }}
+          disabled={!hasMore || loading}
+          onClick={() => setPage(p => p + 1)}
+        >
+          Next →
+        </button>
       </div>
     </div>
   );

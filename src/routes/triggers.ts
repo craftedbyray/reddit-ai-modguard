@@ -270,7 +270,7 @@ async function traverseFlow(
   } finally {
     try {
       await redis.zAdd(MOD_LOG_KEY, { member: JSON.stringify(log), score: log.ts });
-      await redis.zRemRangeByRank(MOD_LOG_KEY, 0, -501);
+      await redis.zRemRangeByScore(MOD_LOG_KEY, 0, Date.now() - 30 * 24 * 60 * 60 * 1000);
     } catch (err) {
       console.error('[modlog] Failed to write log entry:', err);
     }

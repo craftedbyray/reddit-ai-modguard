@@ -175,6 +175,15 @@ export function FlowEditor({ flow, onFlowChange, onNodeSelect, selectedNodeId }:
     syncToFlow(rfNodes, remaining);
   }, [rfEdges, rfNodes, syncToFlow]);
 
+  const selectedEdge = rfEdges.find(e => e.selected);
+
+  function deleteSelectedEdge() {
+    if (!selectedEdge) return;
+    const remaining = rfEdges.filter(e => e.id !== selectedEdge.id);
+    setRFEdges(remaining);
+    syncToFlow(rfNodes, remaining);
+  }
+
   // Add new check node
   function addCheckNode() {
     const id = `check-${Date.now()}`;
@@ -242,18 +251,28 @@ export function FlowEditor({ flow, onFlowChange, onNodeSelect, selectedNodeId }:
           </select>
         </div>
 
+        {selectedEdge && (
+          <button
+            className="btn-ghost"
+            style={{ fontSize: 12, padding: '6px 12px', color: 'var(--red)', borderColor: 'rgba(239,68,68,0.3)' }}
+            onClick={deleteSelectedEdge}
+          >
+            Delete Edge
+          </button>
+        )}
+
         {selectedNodeId && (
           <button
             className="btn-ghost"
-            style={{ fontSize: 12, padding: '6px 12px', color: 'var(--red)', borderColor: 'rgba(239,68,68,0.3)', marginLeft: 'auto' }}
+            style={{ fontSize: 12, padding: '6px 12px', color: 'var(--red)', borderColor: 'rgba(239,68,68,0.3)', marginLeft: selectedEdge ? 0 : 'auto' }}
             onClick={deleteSelectedNode}
           >
             Delete Node
           </button>
         )}
 
-        <p style={{ fontSize: 11, color: 'var(--fg-muted)', marginLeft: selectedNodeId ? 0 : 'auto', fontFamily: 'var(--font-mono)' }}>
-          Drag handles to connect • Click node to edit
+        <p style={{ fontSize: 11, color: 'var(--fg-muted)', marginLeft: (selectedNodeId || selectedEdge) ? 0 : 'auto', fontFamily: 'var(--font-mono)' }}>
+          Drag handles to connect • Click edge to select
         </p>
       </div>
 
