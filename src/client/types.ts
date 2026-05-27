@@ -77,6 +77,20 @@ export interface RFEdge {
   target: string;
 }
 
+// ── Audit log entry ─────────────────────────────────────────
+export interface LogEntry {
+  _id: string;
+  ts: number;
+  author: string;
+  preview: string;
+  flowId: string;
+  flowName: string;
+  violation: boolean;
+  reason: string;
+  action: string | null;
+  contentType: 'post' | 'comment';
+}
+
 // ── Top-level flow (replaces Agent) ─────────────────────────
 export interface ModerationFlow {
   id: string;

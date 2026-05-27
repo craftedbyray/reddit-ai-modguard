@@ -9,21 +9,26 @@ api.get('/auth', async (c) => {
   try {
     const userId = context.userId;
     const subredditName = context.subredditName;
+    console.log('[auth] userId:', userId, 'subreddit:', subredditName);
     if (!userId || !subredditName) {
+      console.log('[auth] DENIED — missing context');
       return c.json({ isModerator: false });
     }
     const cacheKey = `auth:mod:${userId}:${subredditName}`;
     const cached = await redis.get(cacheKey);
-    if (cached !== null) {
+    console.log('[auth] cache hit:', cached);
+    if (cached === '1' || cached === '0') {
+      console.log('[auth] returning cached:', cached === '1');
       return c.json({ isModerator: cached === '1' });
     }
-    const mods = await reddit.getModerators({ subredditName });
+    const mods = await reddit.getModerators({ subredditName }).all();
     const isMod = mods.some((m: { id: string }) => m.id === userId);
+    console.log('[auth] fresh check isMod:', isMod, 'mod count:', mods.length);
     await redis.set(cacheKey, isMod ? '1' : '0');
     await redis.expire(cacheKey, 300);
     return c.json({ isModerator: isMod });
   } catch (err) {
-    console.error('Auth check failed:', err);
+    console.error('[auth] EXCEPTION:', err);
     return c.json({ isModerator: false });
   }
 });
@@ -134,5 +139,22 @@ api.delete('/strikes/:label/users/:user', async (c) => {
   } catch (err) {
     console.error('Error resetting user strikes:', err);
     return c.json({ success: false, error: 'Failed to reset' }, 500);
+  }
+});
+
+// ── Mod Log ───────────────────────────────────────────────────────────────────
+
+const MOD_LOG_KEY = 'modlog';
+
+api.get('/modlog', async (c) => {
+  try {
+    const raw = await redis.zRange(MOD_LOG_KEY, 0, 199, { by: 'rank', reverse: true });
+    const entries = (raw as { member: string; score: number }[])
+      .map((item) => { try { return JSON.parse(item.member); } catch { return null; } })
+      .filter(Boolean);
+    return c.json({ entries });
+  } catch (err) {
+    console.error('Error fetching mod log:', err);
+    return c.json({ entries: [], error: 'Failed to load log' }, 500);
   }
 });

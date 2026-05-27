@@ -49,6 +49,7 @@ interface ActionNodeData {
 const STRIKES_LABELS_KEY = 'strike:_labels';
 const strikeKey = (label: string) => `strike:${label}`;
 const STRIKE_LABEL_REGEX = /^[a-z0-9_-]{1,30}$/;
+const MOD_LOG_KEY = 'modlog';
 
 function compareScore(
   score: number,
@@ -158,89 +159,121 @@ async function traverseFlow(
     postBody?: string;
   }
 ): Promise<void> {
-  const nodeMap = new Map(flow.nodes.map((n) => [n.id, n]));
+  const log = {
+    _id: Math.random().toString(36).slice(2, 7),
+    ts: Date.now(),
+    author: context.authorName ?? 'unknown',
+    preview: content.slice(0, 120).replace(/\n/g, ' '),
+    flowId: flow.id,
+    flowName: flow.name,
+    violation: false,
+    reason: '',
+    action: null as string | null,
+    contentType: (context.commentId ? 'comment' : 'post') as 'post' | 'comment',
+  };
 
-  // Find root: node with no incoming edges
-  const hasIncoming = new Set(flow.edges.map((e) => e.target));
-  const root = flow.nodes.find((n) => !hasIncoming.has(n.id));
-  if (!root) {
-    console.warn(`[${flow.name}] No root node found`);
-    return;
-  }
+  try {
+    const nodeMap = new Map(flow.nodes.map((n) => [n.id, n]));
 
-  let current: RFNode | undefined = root;
-  let depth = 0;
-  let lastReason = '';
-
-  while (current && depth < 20) {
-    depth++;
-
-    if (current.type === 'action') {
-      await executeAction(current.data as ActionNodeData, context, lastReason);
-      const nextEdge = flow.edges.find(
-        (e) => e.source === current!.id && e.sourceHandle === 'next'
-      );
-      if (!nextEdge) return;
-      current = nodeMap.get(nextEdge.target);
-      continue;
+    // Find root: node with no incoming edges
+    const hasIncoming = new Set(flow.edges.map((e) => e.target));
+    const root = flow.nodes.find((n) => !hasIncoming.has(n.id));
+    if (!root) {
+      console.warn(`[${flow.name}] No root node found`);
+      return;
     }
 
-    // Check node: route by mode
-    const data = current.data as CheckNodeData;
-    const mode: CheckMode = data.mode ?? 'llm';
+    let current: RFNode | undefined = root;
+    let depth = 0;
+    let lastReason = '';
 
-    let passed: boolean;
+    while (current && depth < 20) {
+      depth++;
 
-    if (mode === 'strike') {
-      const slabel = (data.strikeLabel ?? '').trim();
-      if (!slabel || !STRIKE_LABEL_REGEX.test(slabel)) {
-        console.warn(
-          `[${flow.name}] Strike check "${data.label}" has invalid label "${slabel}", skipping`
+      if (current.type === 'action') {
+        const actionData = current.data as ActionNodeData;
+        if (log.action === null) log.action = actionData.action;
+        await executeAction(actionData, context, lastReason);
+        const nextEdge = flow.edges.find(
+          (e) => e.source === current!.id && e.sourceHandle === 'next'
         );
-        return;
+        if (!nextEdge) return;
+        current = nodeMap.get(nextEdge.target);
+        continue;
       }
-      const score = context.authorName
-        ? ((await redis.zScore(strikeKey(slabel), context.authorName)) ?? 0)
-        : 0;
-      passed = compareScore(score, data.operator, data.threshold);
-      console.log(
-        `[${flow.name}] strike-check "${data.label}" (${slabel}): score=${score} ${data.operator ?? '>='} ${data.threshold ?? 0} → ${passed}`
+
+      // Check node: route by mode
+      const data = current.data as CheckNodeData;
+      const mode: CheckMode = data.mode ?? 'llm';
+
+      let passed: boolean;
+
+      if (mode === 'strike') {
+        const slabel = (data.strikeLabel ?? '').trim();
+        if (!slabel || !STRIKE_LABEL_REGEX.test(slabel)) {
+          console.warn(
+            `[${flow.name}] Strike check "${data.label}" has invalid label "${slabel}", skipping`
+          );
+          return;
+        }
+        const score = context.authorName
+          ? ((await redis.zScore(strikeKey(slabel), context.authorName)) ?? 0)
+          : 0;
+        passed = compareScore(score, data.operator, data.threshold);
+        console.log(
+          `[${flow.name}] strike-check "${data.label}" (${slabel}): score=${score} ${data.operator ?? '>='} ${data.threshold ?? 0} → ${passed}`
+        );
+        lastReason = `User has ${score} ${slabel} strikes (threshold ${data.operator ?? '>='} ${data.threshold ?? 0})`;
+        if (passed && !log.violation) {
+          log.violation = true;
+          log.reason = lastReason;
+        }
+      } else {
+        if (!data.prompt?.trim()) {
+          console.warn(
+            `[${flow.name}] Node "${data.label}" has no prompt, skipping`
+          );
+          return;
+        }
+        let verdict: LLMVerdict;
+        try {
+          verdict = await callLLM(
+            config.apiKey,
+            config.baseUrl,
+            config.modelName,
+            data.prompt,
+            content
+          );
+        } catch (err) {
+          console.error(`[${flow.name}] LLM error at "${data.label}":`, err);
+          return;
+        }
+        console.log(
+          `[${flow.name}] "${data.label}": violation=${verdict.violation} — ${verdict.reason}`
+        );
+        lastReason = verdict.reason;
+        passed = verdict.violation;
+        if (passed && !log.violation) {
+          log.violation = true;
+          log.reason = verdict.reason;
+        }
+      }
+
+      const handle: 'yes' | 'no' = passed ? 'yes' : 'no';
+      const edge = flow.edges.find(
+        (e) => e.source === current!.id && e.sourceHandle === handle
       );
-      lastReason = `User has ${score} ${slabel} strikes (threshold ${data.operator ?? '>='} ${data.threshold ?? 0})`;
-    } else {
-      if (!data.prompt?.trim()) {
-        console.warn(
-          `[${flow.name}] Node "${data.label}" has no prompt, skipping`
-        );
-        return;
-      }
-      let verdict: LLMVerdict;
-      try {
-        verdict = await callLLM(
-          config.apiKey,
-          config.baseUrl,
-          config.modelName,
-          data.prompt,
-          content
-        );
-      } catch (err) {
-        console.error(`[${flow.name}] LLM error at "${data.label}":`, err);
-        return;
-      }
-      console.log(
-        `[${flow.name}] "${data.label}": violation=${verdict.violation} — ${verdict.reason}`
-      );
-      lastReason = verdict.reason;
-      passed = verdict.violation;
+      if (!edge) return; // dead end, no action
+
+      current = nodeMap.get(edge.target);
     }
-
-    const handle: 'yes' | 'no' = passed ? 'yes' : 'no';
-    const edge = flow.edges.find(
-      (e) => e.source === current!.id && e.sourceHandle === handle
-    );
-    if (!edge) return; // dead end, no action
-
-    current = nodeMap.get(edge.target);
+  } finally {
+    try {
+      await redis.zAdd(MOD_LOG_KEY, { member: JSON.stringify(log), score: log.ts });
+      await redis.zRemRangeByRank(MOD_LOG_KEY, 0, -501);
+    } catch (err) {
+      console.error('[modlog] Failed to write log entry:', err);
+    }
   }
 }
 

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { FlowEditor } from './FlowEditor';
 import { StrikesDrawer } from './StrikesDrawer';
+import { LogView } from './LogView';
 import type { ModerationFlow, RFNode, ActionType, ScopeType } from './types';
 import { ACTION_LABELS, ACTION_COLORS, STRIKE_LABEL_REGEX } from './types';
 
@@ -239,6 +240,12 @@ export default function App() {
   const [newName, setNewName] = useState('');
   const [newScope, setNewScope] = useState<ScopeType>('both');
   const [strikeLabels, setStrikeLabels] = useState<string[]>([]);
+  const [activeTab, setActiveTab] = useState<'editor' | 'log'>('editor');
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+
+  const updateFlow = useCallback((updated: ModerationFlow) => {
+    setFlows(prev => prev.map(f => f.id === updated.id ? updated : f));
+  }, []);
 
   useEffect(() => {
     fetch('/api/auth')
@@ -303,7 +310,6 @@ export default function App() {
     setNewScope('both');
   }
 
-  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   function deleteFlow(id: string) {
     if (pendingDeleteId !== id) {
       setPendingDeleteId(id);
@@ -323,10 +329,6 @@ export default function App() {
     persist(flows.map(f => f.id === id ? { ...f, isActive: !f.isActive } : f));
   }
 
-  const updateFlow = useCallback((updated: ModerationFlow) => {
-    setFlows(prev => prev.map(f => f.id === updated.id ? updated : f));
-  }, []);
-
   function saveFlow() {
     persist(flows);
   }
@@ -345,21 +347,47 @@ export default function App() {
         {/* Header */}
         <header style={{
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          padding: '14px 20px', borderBottom: '1px solid var(--border)',
+          padding: '0 20px', height: 56, borderBottom: '1px solid var(--border)',
           background: 'rgba(5,5,6,0.85)', backdropFilter: 'blur(12px)',
-          flexShrink: 0,
+          flexShrink: 0, gap: 16,
         }}>
-          <div>
-            <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--fg)', letterSpacing: '-0.02em' }}>
-              AI Mod Guardian
-            </h1>
-            <p style={{ color: 'var(--fg-muted)', fontSize: 11, marginTop: 2, fontFamily: 'var(--font-mono)' }}>
-              Visual moderation flow builder
-            </p>
+          {/* Logo */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+            <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--fg)', letterSpacing: '-0.01em' }}>AI Guard</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+
+          {/* Tabs */}
+          <div style={{ display: 'flex', gap: 2 }}>
+            {([
+              { id: 'editor', label: 'Flow Editor' },
+              { id: 'log',    label: 'Audit Log' },
+            ] as const).map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                style={{
+                  padding: '6px 16px', borderRadius: 6, fontSize: 13, fontWeight: 500,
+                  cursor: 'pointer', border: 'none', fontFamily: 'var(--font-sans)',
+                  background: activeTab === tab.id ? 'rgba(255,255,255,0.08)' : 'transparent',
+                  color: activeTab === tab.id ? 'var(--fg)' : 'var(--fg-muted)',
+                  transition: 'all 140ms',
+                }}
+              >
+                {tab.label}
+                {tab.id === 'log' && (
+                  <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: 'var(--red)', boxShadow: '0 0 5px var(--red)', marginLeft: 6, verticalAlign: 'middle' }} />
+                )}
+              </button>
+            ))}
+          </div>
+
+          {/* Right actions */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
             {saving && <span style={{ fontSize: 11, color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)' }}>saving…</span>}
-            {selectedFlow && (
+            {activeTab === 'editor' && selectedFlow && (
               <button className="btn-primary" style={{ flex: 'none', padding: '8px 16px', fontSize: 12 }} onClick={saveFlow} disabled={saving}>
                 Save Flow
               </button>
@@ -373,15 +401,11 @@ export default function App() {
                 background: 'rgba(236,72,153,0.08)',
                 fontSize: 12, fontWeight: 600,
                 color: '#ec4899', fontFamily: 'var(--font-mono)',
-                cursor: 'pointer',
-                transition: 'all 150ms ease',
+                cursor: 'pointer', transition: 'all 150ms ease',
               }}
               title="Manage strike labels & rankings"
             >
-              <span style={{
-                width: 6, height: 6, borderRadius: 999,
-                background: '#ec4899', boxShadow: '0 0 6px #ec4899',
-              }} />
+              <span style={{ width: 6, height: 6, borderRadius: 999, background: '#ec4899', boxShadow: '0 0 6px #ec4899' }} />
               Strikes
             </button>
             <div style={{
@@ -411,6 +435,8 @@ export default function App() {
 
         {/* Body */}
         <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+          {activeTab === 'log' && <LogView />}
+          {activeTab === 'editor' && <>
 
           {/* Sidebar */}
           <div style={{
@@ -507,6 +533,7 @@ export default function App() {
               </p>
             </div>
           )}
+          </>}
         </div>
       </div>
     </div>
