@@ -4,6 +4,8 @@ AI Guard lets moderators build visual, AI-powered moderation workflows that auto
 
 Connect an AI check to any moderation action (remove, ban, flair, warn, mute, strike) using a drag-and-drop flow editor. Every decision is logged in a 30-day audit trail so you always know what happened and why.
 
+![AI Guard Flow Editor](reddit-ai-mod.png)
+
 ---
 
 ## Features
