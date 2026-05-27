@@ -1,94 +1,103 @@
-# Devvit Mod Tool Template
+# AI Guard — Visual AI Moderation for Reddit
 
-A template for building Reddit moderation tools using Devvit web. This template provides a complete foundation for creating custom moderation tools with bulk comment management capabilities.
+AI Guard lets moderators build visual, AI-powered moderation workflows that automatically review posts and comments and take action — no coding required.
+
+Connect an AI check to any moderation action (remove, ban, flair, warn, mute, strike) using a drag-and-drop flow editor. Every decision is logged in a 30-day audit trail so you always know what happened and why.
+
+---
 
 ## Features
 
-This template includes a working mod tool called **"Mop"** that demonstrates:
+### Visual Flow Editor
+Build moderation logic like a flowchart. Drag nodes onto a canvas, connect them with Yes/No edges, and save. Flows run automatically on every new post and comment in your subreddit.
 
-- **Bulk Comment Management**: Remove or lock multiple comments at once
-- **Thread-level Actions**: "Mop comments" - Remove/lock a comment and all its replies
-- **Post-level Actions**: "Mop post comments" - Remove/lock all comments on a post
-- **Flexible Options**:
-  - Remove comments, lock comments, or both
-  - Skip distinguished comments (moderator/admin posts)
-- **Permission Checks**: Only moderators with proper permissions can use the tool
-- **User-friendly Forms**: Interactive forms with clear options and validation
+### AI Check Nodes
+Write a plain-English prompt describing what to detect — spam, hate speech, off-topic content, anything. AI Guard calls your configured LLM and routes the content based on the verdict.
 
-## Tech Stack
+### Strike System
+Track repeat offenders across any category you define (spam, harassment, brigading). Use strike check nodes to trigger escalating consequences — warn on the first strike, ban on the third.
 
-- [Devvit](https://developers.reddit.com/): Reddit's platform for building and deploying apps
-- [Vite](https://vite.dev/): Fast build tool for the web components
-- [Hono](https://hono.dev/): Lightweight web framework for backend logic
-- [TypeScript](https://www.typescriptlang.org/): Type-safe development
+### Audit Log
+Every flow execution is recorded with the author, a content preview, which flow ran, the AI's verdict and reasoning, and what action was taken. Paginated, searchable, and filtered by action type. Data is retained for 30 days.
 
-## Getting Started
+### Multiple Actions per Flow
+Chain action nodes together — remove a post, add a strike, and send a modmail warning all in one flow.
 
-1. **Clone this template** or use it as a starting point for your mod tool
-2. **Install dependencies**:
-   ```bash
-   npm install
-   ```
-3. **Configure your app** in `devvit.json`:
-   - Update the app name
-   - Set your development subreddit
-4. **Start developing**:
-   ```bash
-   npm run dev
-   ```
-5. **Test your changes** in your development subreddit
+---
 
-## Project Structure
+## Setup
 
-```
-src/
-├── index.ts          # Main server setup with Hono routes
-├── core/
-│   └── nuke.ts       # Core moderation logic for bulk operations
-└── routes/
-    ├── api.ts        # Public API endpoints
-    ├── forms.ts      # Form submission handlers
-    ├── menu.ts       # Context menu item handlers
-    └── triggers.ts   # App lifecycle triggers
-```
+### 1. Install the app
+Install AI Guard from the Reddit app directory onto your subreddit.
 
-## Customizing Your Mod Tool
+### 2. Configure your API key
+Go to **Mod Tools → Apps → AI Guard → App Settings** and fill in:
 
-This template is designed to be easily customizable:
+| Setting | Description |
+|---|---|
+| API Key | Your OpenAI key (`sk-...`) or Aliyun DashScope key |
+| Base URL | Leave default for OpenAI. For Qwen: `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| Model Name | e.g. `gpt-4o-mini`, `qwen-plus`, `qwen-turbo` |
 
-1. **Modify existing actions**: Edit the nuke functionality in `src/core/nuke.ts`
-2. **Add new menu items**: Update `devvit.json` and add handlers in `src/routes/menu.ts`
-3. **Create new forms**: Add form definitions and handlers in `src/routes/forms.ts`
-4. **Add API endpoints**: Extend `src/routes/api.ts` for external integrations
+### 3. Open the Flow Editor
+Go to your subreddit → **Mod Tools** → **Manage Moderation Flows**.
 
-## Commands
+### 4. Create your first flow
+1. Click **+ New Flow**, give it a name, choose whether it applies to posts, comments, or both
+2. Add a **Check Node** — write a prompt like *"Is this post spam or advertising?"*
+3. Add an **Action Node** — choose Remove, Ban, Flair, Warn, Mute, or Strike
+4. Connect the Check Node's **Yes** handle to the Action Node
+5. Click **Save Flow**
 
-- `npm run dev`: Starts development mode with live reload on your test subreddit
-- `npm run build`: Builds your mod tool for production
-- `npm run deploy`: Uploads a new version of your app to Reddit
-- `npm run launch`: Publishes your app for review and public use
-- `npm run login`: Authenticates your CLI with Reddit
-- `npm run type-check`: Runs TypeScript type checking, linting, and formatting
+Flows go live immediately. Every new post or comment in your subreddit will be evaluated.
 
-## How It Works
+---
 
-The template demonstrates Reddit mod tool development through the "Mop" feature:
+## Flow Node Types
 
-1. **Context Menu Integration**: Click on the Mod Shield icon in a comment to see custom mod actions
-2. **Permission Validation**: Automatically checks if the user has moderation permissions
-3. **Interactive Forms**: Presents options through Reddit's native form system
-4. **Reddit API**: Processes multiple comments using Reddit's API
+### Check Node — AI Prompt mode
+Calls your configured LLM with the content and your prompt. Routes to **Yes** if the AI detects a violation, **No** otherwise.
 
-## Development Notes
+### Check Node — Strike Count mode
+Looks up the author's strike count for a given label. Routes to **Yes** if the count meets your threshold (e.g. `>= 3`).
 
-- **Permissions**: The app requires `reddit: true` permission to access Reddit's API
-- **User Types**: Menu items are restricted to `moderator` user type
+### Action Node
+Executes a moderation action. Supported actions:
 
-## Deployment
+| Action | Description |
+|---|---|
+| Remove | Remove the post or comment |
+| Spam | Remove and mark as spam |
+| Filter | Send to mod queue |
+| Lock | Lock the post or comment |
+| Approve | Approve the content |
+| Flair | Set a post flair |
+| Warn | Send a modmail to the mod team |
+| Ban | Ban the author (permanent or temporary) |
+| Mute | Mute the author |
+| Strike | Add one strike to the author under a label |
 
-1. Test thoroughly in your development subreddit
-2. Run `npm run deploy` to upload your app
-3. Use `npm run launch` to submit for Reddit's app review process
-4. Once approved, users can install your mod tool from Reddit's app directory
+---
 
-This template provides everything you need to build powerful, user-friendly moderation tools for Reddit communities.
+## Strikes
+
+Strikes let you track violations per category. Define labels (e.g. `spam`, `harassment`) in the **Strikes** panel, then:
+- Use a **Strike action node** to increment a user's count when a flow fires
+- Use a **Strike check node** to escalate consequences once a user reaches a threshold
+
+The Strikes panel shows a live ranking of users by strike count under each label. Individual users can be reset.
+
+---
+
+## Supported LLM Providers
+
+Any OpenAI-compatible API works:
+- **OpenAI** — `gpt-4o`, `gpt-4o-mini`, etc.
+- **Aliyun DashScope / Qwen** — `qwen-plus`, `qwen-turbo`, `qwen-max`
+- Any other provider with an OpenAI-compatible endpoint
+
+---
+
+## Moderator-Only Access
+
+All features are restricted to subreddit moderators. Non-moderators see an access denied screen.
