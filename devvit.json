@@ -35,12 +35,20 @@
         "location": "subreddit",
         "forUserType": "moderator",
         "endpoint": "/internal/menu/manage-agents"
+      },
+      {
+        "label": "Manage API Key",
+        "description": "Set or remove the AI provider API key. Input is masked and not visible to other mods.",
+        "location": "subreddit",
+        "forUserType": "moderator",
+        "endpoint": "/internal/menu/manage-api-key"
       }
     ]
   },
   "forms": {
     "mopComment": "/internal/form/mop-comment-submit",
-    "mopPost": "/internal/form/mop-post-submit"
+    "mopPost": "/internal/form/mop-post-submit",
+    "manageApiKey": "/internal/form/manage-api-key-submit"
   },
   "triggers": {
     "onAppInstall": "/internal/triggers/on-app-install",
@@ -68,8 +76,8 @@
     "subreddit": {
       "apiKey": {
         "type": "string",
-        "label": "API Key (OpenAI or Compatible)",
-        "helpText": "Enter your API key. E.g., OpenAI 'sk-...' or Aliyun DashScope key.",
+        "label": "API Key — legacy (⚠️ visible to all mods)",
+        "helpText": "Recommended: use the 'Manage API Key' menu in subreddit Mod Tools — it accepts a masked input and stores the key privately. This field is kept for backward compatibility and is visible to any moderator with access to App Settings. A masked key set via the menu always overrides this field. To clear, empty this field and save.",
         "placeholder": "sk-..."
       },
       "baseUrl": {

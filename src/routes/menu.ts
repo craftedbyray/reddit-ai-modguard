@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
 import type { MenuItemRequest, UiResponse } from '@devvit/web/shared';
 import type { FormField } from '@devvit/shared-types/shared/form.js';
-import { reddit } from '@devvit/web/server';
+import { reddit, redis } from '@devvit/web/server';
+import { API_KEY_REDIS_KEY } from '../core/settings';
 
 export const menu = new Hono();
 
@@ -62,6 +63,45 @@ menu.post('/mop-post', async (c) => {
       showForm: {
         name: 'mopPost',
         form: buildNukeForm('Mop Post Comments', request.targetId),
+      },
+    },
+    200
+  );
+});
+
+menu.post('/manage-api-key', async (c) => {
+  const existing = await redis.get(API_KEY_REDIS_KEY);
+  const isConfigured = Boolean(existing && existing.trim());
+  const fields: FormField[] = [
+    {
+      name: 'newKey',
+      label: isConfigured ? 'New API Key (replaces current)' : 'API Key',
+      type: 'string',
+      isSecret: true,
+      scope: 'app',
+      required: false,
+      helpText:
+        "Input is masked. Leave empty and check 'Remove' below to delete the current key.",
+      placeholder: 'sk-...',
+    },
+    {
+      name: 'remove',
+      label: 'Remove existing API key',
+      type: 'boolean',
+      defaultValue: false,
+      helpText: 'If checked, the stored key is deleted and any value typed above is ignored.',
+    },
+  ];
+  return c.json<UiResponse>(
+    {
+      showForm: {
+        name: 'manageApiKey',
+        form: {
+          fields,
+          title: isConfigured ? 'Manage API Key (currently configured)' : 'Set API Key',
+          acceptLabel: 'Save',
+          cancelLabel: 'Cancel',
+        },
       },
     },
     200

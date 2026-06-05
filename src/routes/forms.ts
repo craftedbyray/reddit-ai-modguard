@@ -1,8 +1,9 @@
 import { Hono } from 'hono';
 import type { UiResponse } from '@devvit/web/shared';
-import { context } from '@devvit/web/server';
+import { context, redis } from '@devvit/web/server';
 import { isT1, isT3 } from '@devvit/shared-types/tid.js';
 import { handleNuke, handleNukePost } from '../core/nuke';
+import { API_KEY_REDIS_KEY } from '../core/settings';
 
 type NukeFormValues = {
   remove?: boolean;
@@ -109,6 +110,38 @@ forms.post('/mop-post-submit', async (c) => {
     {
       showToast: `${result.success ? 'Success' : 'Failed'} : ${result.message}`,
     },
+    200
+  );
+});
+
+type ManageApiKeyValues = {
+  newKey?: string;
+  remove?: boolean;
+};
+
+forms.post('/manage-api-key-submit', async (c) => {
+  const values = await c.req.json<ManageApiKeyValues>();
+  const remove = Boolean(values.remove);
+  const newKey = typeof values.newKey === 'string' ? values.newKey.trim() : '';
+
+  if (remove) {
+    await redis.del(API_KEY_REDIS_KEY);
+    return c.json<UiResponse>(
+      { showToast: { text: 'API key removed.', appearance: 'success' } },
+      200
+    );
+  }
+
+  if (!newKey) {
+    return c.json<UiResponse>(
+      { showToast: 'No change: enter a key, or check Remove to delete.' },
+      200
+    );
+  }
+
+  await redis.set(API_KEY_REDIS_KEY, newKey);
+  return c.json<UiResponse>(
+    { showToast: { text: 'API key saved (masked, stored privately).', appearance: 'success' } },
     200
   );
 });
